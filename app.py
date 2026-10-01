@@ -210,107 +210,218 @@ with tab_movimientos:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# HELPERS JERARQUÍA (compartidos por ingresos y egresos)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def _safe_date(val):
+    if not val:
+        return date.min
+    try:
+        return pd.to_datetime(val).date()
+    except Exception:
+        return date.min
+
+def _fmt_fecha(val):
+    if not val:
+        return "—"
+    try:
+        return pd.to_datetime(val).strftime("%d/%m/%Y")
+    except Exception:
+        return str(val)
+
+def _render_fields_jerarquia(tipo, pfx, subs_by_rubro, items_by_sub, rubro_opts, caja_opts, defaults=None):
+    """Renderiza fecha, rubro→subrubro→item, monto, caja, descripción. Retorna dict con los valores."""
+    d = defaults or {}
+    fecha  = st.date_input("Fecha", value=d.get("fecha", date.today()), format="DD/MM/YYYY", key=f"{pfx}_fecha")
+    rubro_list = [""] + list(rubro_opts.keys())
+    r_idx  = rubro_list.index(d.get("rubro_nm", "")) if d.get("rubro_nm") in rubro_list else 0
+    rubro  = st.selectbox("Rubro", rubro_list, index=r_idx, key=f"{pfx}_rubro")
+    sub_opts = {s["nombre"]: s["id"] for s in subs_by_rubro.get(rubro_opts.get(rubro), [])} if rubro else {}
+    s_list = [""] + list(sub_opts.keys())
+    s_idx  = s_list.index(d.get("sub_nm", "")) if d.get("sub_nm") in s_list else 0
+    subrubro = st.selectbox("Subrubro", s_list, index=s_idx, key=f"{pfx}_sub")
+    item_map = {i["nombre"]: i["id"] for i in items_by_sub.get(sub_opts.get(subrubro), [])} if subrubro else {}
+    i_list = [""] + list(item_map.keys())
+    i_idx  = i_list.index(d.get("item_nm", "")) if d.get("item_nm") in i_list else 0
+    item_nm = st.selectbox("Ítem", i_list, index=i_idx, key=f"{pfx}_item")
+    monto_str = st.text_input("Monto ($)", value=d.get("monto_str", ""), key=f"{pfx}_monto")
+    try:
+        monto = float(monto_str.replace(",", ".")) if monto_str else 0.0
+    except ValueError:
+        monto = 0.0
+    caja_list = [""] + list(caja_opts.keys())
+    c_idx  = caja_list.index(d.get("caja_nm", "")) if d.get("caja_nm") in caja_list else 0
+    caja   = st.selectbox("Caja", caja_list, index=c_idx, key=f"{pfx}_caja")
+    desc   = st.text_input("Descripción (opcional)", value=d.get("desc", ""), key=f"{pfx}_desc")
+    return {"fecha": fecha, "rubro": rubro, "sub_opts": sub_opts, "subrubro": subrubro,
+            "item_nm": item_nm, "item_id": item_map.get(item_nm),
+            "monto": monto, "caja": caja, "desc": desc}
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # INGRESOS
 # ═══════════════════════════════════════════════════════════════════════════════
 
 with tab_ingresos:
-    st.subheader("Ingresos")
+    _oi_rubros    = db.cargar_rubros_ingresos()
+    _oi_cajas     = db.cargar_cajas()
+    _oi_rubro_map = {r["id"]: r["nombre"] for r in _oi_rubros}
+    _oi_caja_map  = {c["id"]: c["nombre"] for c in _oi_cajas}
+    _oi_rubro_opts = {r["nombre"]: r["id"] for r in _oi_rubros}
+    _oi_caja_opts  = {c["nombre"]: c["id"] for c in _oi_cajas}
 
-    with st.expander("➕ Nuevo ingreso", expanded=False):
-        ci1, ci2 = st.columns(2)
-        _fi = ci1.date_input("Fecha", value=date.today(), format="DD/MM/YYYY", key="ni_fecha")
-        _mi = ci2.number_input("Monto", min_value=0.0, step=100.0, format="%.2f", key="ni_monto")
+    _all_oi_subs  = db.cargar_subrubros_ingresos()
+    _all_oi_items = db.cargar_items_ingresos()
+    _oi_subs_by_rubro: dict = {}
+    for _s in _all_oi_subs:
+        _oi_subs_by_rubro.setdefault(_s["rubro_id"], []).append(_s)
+    _oi_items_by_sub: dict = {}
+    for _i in _all_oi_items:
+        _oi_items_by_sub.setdefault(_i["subrubro_id"], []).append(_i)
 
-        _rubros_i = db.cargar_rubros_ingresos()
-        _rmap_i   = {r["nombre"]: r["id"] for r in _rubros_i}
-        _ri_sel   = st.selectbox("Rubro", ["— sin rubro —"] + list(_rmap_i.keys()), key="ni_rubro")
-        _ri_id    = _rmap_i.get(_ri_sel)
+    _oi_tab1, _oi_tab2, _oi_tab3 = st.tabs(["➕ Ingresar", "✏️ Editar / Eliminar", "📋 Todos los ingresos"])
 
-        _sub_i_opts = db.cargar_subrubros_ingresos(_ri_id) if _ri_id else []
-        _smap_i     = {s["nombre"]: s["id"] for s in _sub_i_opts}
-        _si_sel     = st.selectbox("Subrubro", ["— sin subrubro —"] + list(_smap_i.keys()), key="ni_sub")
-        _si_id      = _smap_i.get(_si_sel)
+    with _oi_tab1:
+        @st.fragment
+        def _oi_nuevo():
+            _seed = st.session_state.get("ni_seed", 0)
+            _pfx  = f"ni{_seed}"
+            _fecha_def = st.session_state.pop("ni_fecha_keep", date.today())
+            with st.container(border=True):
+                _f = _render_fields_jerarquia("ingreso", _pfx, _oi_subs_by_rubro, _oi_items_by_sub,
+                                              _oi_rubro_opts, _oi_caja_opts, defaults={"fecha": _fecha_def})
+                if st.button("Guardar ingreso", type="primary", key=f"ni_guardar{_seed}"):
+                    if not _f["rubro"]:
+                        st.error("Seleccioná un rubro.")
+                    elif not _f["subrubro"]:
+                        st.error("Seleccioná un subrubro.")
+                    elif not _f["item_id"]:
+                        st.error("Seleccioná un ítem.")
+                    elif _f["monto"] <= 0:
+                        st.error("El monto debe ser mayor a 0.")
+                    else:
+                        try:
+                            db.guardar_ingreso(
+                                fecha=_f["fecha"],
+                                rubro_id=_oi_rubro_opts.get(_f["rubro"]),
+                                subrubro_id=_f["sub_opts"].get(_f["subrubro"]),
+                                item_id=_f["item_id"],
+                                monto=_f["monto"],
+                                caja_id=_oi_caja_opts.get(_f["caja"]),
+                                descripcion=_f["desc"],
+                            )
+                            st.session_state["ni_fecha_keep"] = _f["fecha"]
+                            st.session_state["ni_seed"] = _seed + 1
+                            st.session_state["oi_ok"] = True
+                            st.rerun(scope="fragment")
+                        except Exception as e:
+                            st.error(f"Error: {e}")
+                if st.session_state.pop("oi_ok", False):
+                    st.success("✅ Ingreso guardado.")
+        _oi_nuevo()
 
-        _item_i_opts = db.cargar_items_ingresos(_si_id) if _si_id else []
-        _imap_i      = {it["nombre"]: it["id"] for it in _item_i_opts}
-        _ii_sel      = st.selectbox("Ítem", ["— sin ítem —"] + list(_imap_i.keys()), key="ni_item")
-        _ii_id       = _imap_i.get(_ii_sel)
+    with _oi_tab2:
+        @st.fragment
+        def _oi_editar():
+            _lista = db.cargar_ingresos()
+            if not _lista:
+                st.info("No hay ingresos cargados todavía.")
+                return
+            with st.form("oi_filt", border=False):
+                _dc1, _dc2 = st.columns(2)
+                _oi_e_desde = _dc1.date_input("Desde", value=date(date.today().year, date.today().month, 1), format="DD/MM/YYYY", key="oi_e_desde")
+                _oi_e_hasta = _dc2.date_input("Hasta", value=date.today(), format="DD/MM/YYYY", key="oi_e_hasta")
+                st.form_submit_button("🔄 Actualizar", type="primary")
+            _lista = [o for o in _lista if _oi_e_desde <= _safe_date(o.get("fecha")) <= _oi_e_hasta]
+            if not _lista:
+                st.caption("Sin registros en el rango.")
+                return
+            for _oi in _lista:
+                _oi_id   = _oi["id"]
+                _r_nm    = (_oi.get("rubros_ingresos") or {}).get("nombre") or _oi_rubro_map.get(_oi.get("rubro_id"), "—")
+                _s_nm    = (_oi.get("subrubros_ingresos") or {}).get("nombre") or "—"
+                _it_nm   = (_oi.get("items_ingresos") or {}).get("nombre") or ""
+                _cj_nm   = _oi_caja_map.get(_oi.get("caja_id"), "—")
+                _mn      = float(_oi.get("monto") or 0)
+                _fch     = _oi.get("fecha", "")
+                with st.container(border=True):
+                    _ca, _cb, _cc = st.columns([5, 1, 1])
+                    _it_str = f" · {_it_nm}" if _it_nm else ""
+                    _ca.markdown(f"**{_fmt_fecha(_fch)}** · {_r_nm} / {_s_nm}{_it_str} · **$ {_mn:,.0f}** · {_cj_nm}")
+                    if _cb.button("✏️", key=f"oi_edit_{_oi_id}"):
+                        st.session_state[f"oi_editing_{_oi_id}"] = True
+                        st.rerun(scope="fragment")
+                    if _cc.button("🗑️", key=f"oi_del_{_oi_id}"):
+                        db.eliminar_ingreso(_oi_id)
+                        st.rerun(scope="fragment")
+                if st.session_state.get(f"oi_editing_{_oi_id}"):
+                    with st.container(border=True):
+                        _e = _render_fields_jerarquia("ingreso", f"oie{_oi_id}", _oi_subs_by_rubro, _oi_items_by_sub,
+                                                      _oi_rubro_opts, _oi_caja_opts, defaults={
+                                                          "fecha": _safe_date(_fch) or date.today(),
+                                                          "rubro_nm": _r_nm, "sub_nm": _s_nm, "item_nm": _it_nm,
+                                                          "monto_str": str(_mn), "caja_nm": _cj_nm,
+                                                          "desc": _oi.get("descripcion") or "",
+                                                      })
+                        _ec1, _ec2 = st.columns(2)
+                        if _ec1.button("Guardar", type="primary", key=f"oi_save_{_oi_id}"):
+                            if not _e["rubro"] or not _e["item_id"] or _e["monto"] <= 0:
+                                st.error("Completá rubro, ítem y monto.")
+                            else:
+                                db.actualizar_ingreso(_oi_id, _e["fecha"],
+                                    _oi_rubro_opts.get(_e["rubro"]),
+                                    _e["sub_opts"].get(_e["subrubro"]),
+                                    _e["item_id"],
+                                    _oi_caja_opts.get(_e["caja"]),
+                                    _e["monto"], _e["desc"])
+                                st.session_state.pop(f"oi_editing_{_oi_id}", None)
+                                st.rerun(scope="fragment")
+                        if _ec2.button("Cancelar", key=f"oi_cancel_{_oi_id}"):
+                            st.session_state.pop(f"oi_editing_{_oi_id}", None)
+                            st.rerun(scope="fragment")
+        _oi_editar()
 
-        _cajas_i = db.cargar_cajas()
-        _cmap_i  = {c["nombre"]: c["id"] for c in _cajas_i}
-        _ci_sel  = st.selectbox("Caja", ["— sin caja —"] + list(_cmap_i.keys()), key="ni_caja")
-        _ci_id   = _cmap_i.get(_ci_sel)
-
-        _desc_i = st.text_input("Descripción (opcional)", key="ni_desc")
-        if st.button("💾 Guardar ingreso", type="primary", key="ni_save"):
-            if _mi <= 0:
-                st.error("El monto debe ser mayor a 0.")
-            else:
-                db.guardar_ingreso(_fi, _ri_id, _si_id, _ii_id, _ci_id, _mi, _desc_i)
-                st.success("✅ Ingreso guardado.")
-                st.rerun()
-
-    # Listado
-    _d1i, _d2i = _mes_actual()
-    c1, c2, _ = st.columns([1, 1, 3])
-    _desde_i = c1.date_input("Desde", value=_d1i, format="DD/MM/YYYY", key="i_desde")
-    _hasta_i = c2.date_input("Hasta", value=_d2i, format="DD/MM/YYYY", key="i_hasta")
-
-    _lista_i = db.cargar_ingresos(_desde_i, _hasta_i)
-    if _lista_i:
-        for _row in _lista_i:
-            with st.expander(f"{_row['fecha']}  |  {_nombre_rubro(_row, 'ingreso')}  |  {fmt(_row['monto'])}"):
-                ce1, ce2 = st.columns(2)
-                ce1.write(f"**Subrubro:** {_nombre_subrubro(_row, 'ingreso')}")
-                ce1.write(f"**Ítem:** {_nombre_item(_row, 'ingreso')}")
-                ce2.write(f"**Caja:** {_nombre_caja(_row)}")
-                ce2.write(f"**Descripción:** {_row.get('descripcion') or '—'}")
-
-                _rid = _row["id"]
-                ec1, ec2 = st.columns(2)
-                _ef = ec1.date_input("Fecha", value=date.fromisoformat(_row["fecha"]), format="DD/MM/YYYY", key=f"ei_{_rid}_f")
-                _em = ec2.number_input("Monto", value=float(_row["monto"]), step=100.0, format="%.2f", key=f"ei_{_rid}_m")
-
-                _rubros_e = db.cargar_rubros_ingresos()
-                _rmap_e   = {r["nombre"]: r["id"] for r in _rubros_e}
-                _er_opts  = ["— sin rubro —"] + list(_rmap_e.keys())
-                _er_actual = _nombre_rubro(_row, "ingreso") if _nombre_rubro(_row, "ingreso") != "—" else "— sin rubro —"
-                _er_sel   = st.selectbox("Rubro", _er_opts, index=_er_opts.index(_er_actual) if _er_actual in _er_opts else 0, key=f"ei_{_rid}_r")
-                _er_id    = _rmap_e.get(_er_sel)
-
-                _sub_e_opts = db.cargar_subrubros_ingresos(_er_id) if _er_id else []
-                _smap_e     = {s["nombre"]: s["id"] for s in _sub_e_opts}
-                _es_opts    = ["— sin subrubro —"] + list(_smap_e.keys())
-                _es_actual  = _nombre_subrubro(_row, "ingreso") if _nombre_subrubro(_row, "ingreso") != "—" else "— sin subrubro —"
-                _es_sel     = st.selectbox("Subrubro", _es_opts, index=_es_opts.index(_es_actual) if _es_actual in _es_opts else 0, key=f"ei_{_rid}_s")
-                _es_id      = _smap_e.get(_es_sel)
-
-                _item_e_opts = db.cargar_items_ingresos(_es_id) if _es_id else []
-                _imap_e      = {it["nombre"]: it["id"] for it in _item_e_opts}
-                _ei_opts     = ["— sin ítem —"] + list(_imap_e.keys())
-                _ei_actual   = _nombre_item(_row, "ingreso") if _nombre_item(_row, "ingreso") != "—" else "— sin ítem —"
-                _ei_sel      = st.selectbox("Ítem", _ei_opts, index=_ei_opts.index(_ei_actual) if _ei_actual in _ei_opts else 0, key=f"ei_{_rid}_i")
-                _ei_id       = _imap_e.get(_ei_sel)
-
-                _cajas_e = db.cargar_cajas()
-                _cmap_e  = {c["nombre"]: c["id"] for c in _cajas_e}
-                _ec_opts = ["— sin caja —"] + list(_cmap_e.keys())
-                _ec_actual = _nombre_caja(_row) if _nombre_caja(_row) != "—" else "— sin caja —"
-                _ec_sel   = st.selectbox("Caja", _ec_opts, index=_ec_opts.index(_ec_actual) if _ec_actual in _ec_opts else 0, key=f"ei_{_rid}_c")
-                _ec_id    = _cmap_e.get(_ec_sel)
-
-                _ed = st.text_input("Descripción", value=_row.get("descripcion") or "", key=f"ei_{_rid}_d")
-
-                bc1, bc2 = st.columns(2)
-                if bc1.button("💾 Guardar", key=f"ei_{_rid}_upd"):
-                    db.actualizar_ingreso(_row["id"], _ef, _er_id, _es_id, _ei_id, _ec_id, _em, _ed)
-                    st.success("✅ Actualizado.")
-                    st.rerun()
-                if bc2.button("🗑️ Eliminar", key=f"ei_{_rid}_del"):
-                    db.eliminar_ingreso(_row["id"])
-                    st.rerun()
-    else:
-        st.info("Sin ingresos en el período.")
+    with _oi_tab3:
+        @st.fragment
+        def _oi_todos():
+            _lista = db.cargar_ingresos()
+            if not _lista:
+                st.info("No hay ingresos cargados todavía.")
+                return
+            with st.form("oi_all_filt", border=False):
+                _dc1, _dc2 = st.columns(2)
+                _oi_v_desde = _dc1.date_input("Desde", value=date(date.today().year, date.today().month, 1), format="DD/MM/YYYY", key="oi_v_desde")
+                _oi_v_hasta = _dc2.date_input("Hasta", value=date.today(), format="DD/MM/YYYY", key="oi_v_hasta")
+                st.form_submit_button("🔄 Actualizar", type="primary")
+            _lista = [o for o in _lista if _oi_v_desde <= _safe_date(o.get("fecha")) <= _oi_v_hasta]
+            if not _lista:
+                st.caption("Sin registros en el rango.")
+                return
+            _by_rub: dict = {}
+            for _oi in _lista:
+                _r = (_oi.get("rubros_ingresos") or {}).get("nombre") or "—"
+                _s = (_oi.get("subrubros_ingresos") or {}).get("nombre") or "—"
+                _it = (_oi.get("items_ingresos") or {}).get("nombre") or "—"
+                _by_rub.setdefault(_r, {}).setdefault(_s, {}).setdefault(_it, []).append(_oi)
+            _total = sum(float(x.get("monto") or 0) for x in _lista)
+            st.metric("Total", fmt(_total))
+            for _r_nm, _subs in sorted(_by_rub.items()):
+                _r_tot = sum(float(x.get("monto") or 0) for s in _subs.values() for items in s.values() for x in items)
+                with st.expander(f"{_r_nm} — $ {_r_tot:,.0f}"):
+                    for _s_nm, _s_items in sorted(_subs.items()):
+                        _s_tot = sum(float(x.get("monto") or 0) for items in _s_items.values() for x in items)
+                        with st.expander(f"{_s_nm} — $ {_s_tot:,.0f}"):
+                            for _it_nm, _it_items in sorted(_s_items.items()):
+                                _it_tot = sum(float(x.get("monto") or 0) for x in _it_items)
+                                with st.expander(f"{_it_nm} — $ {_it_tot:,.0f}"):
+                                    _rows = [{"Fecha": _fmt_fecha(_oi.get("fecha")),
+                                              "Monto": float(_oi.get("monto") or 0),
+                                              "Caja": _oi_caja_map.get(_oi.get("caja_id"), "—"),
+                                              "Descripción": _oi.get("descripcion") or ""}
+                                             for _oi in sorted(_it_items, key=lambda x: str(x.get("fecha") or ""), reverse=True)]
+                                    st.dataframe(pd.DataFrame(_rows), hide_index=True, use_container_width=True,
+                                                 column_config={"Monto": st.column_config.NumberColumn("Monto ($)", format="$ %,.0f")})
+        _oi_todos()
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -318,103 +429,175 @@ with tab_ingresos:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 with tab_egresos:
-    st.subheader("Egresos")
+    _oe_rubros    = db.cargar_rubros_egresos()
+    _oe_cajas     = db.cargar_cajas()
+    _oe_rubro_map = {r["id"]: r["nombre"] for r in _oe_rubros}
+    _oe_caja_map  = {c["id"]: c["nombre"] for c in _oe_cajas}
+    _oe_rubro_opts = {r["nombre"]: r["id"] for r in _oe_rubros}
+    _oe_caja_opts  = {c["nombre"]: c["id"] for c in _oe_cajas}
 
-    with st.expander("➕ Nuevo egreso", expanded=False):
-        ce1, ce2 = st.columns(2)
-        _fe = ce1.date_input("Fecha", value=date.today(), format="DD/MM/YYYY", key="ne_fecha")
-        _me = ce2.number_input("Monto", min_value=0.0, step=100.0, format="%.2f", key="ne_monto")
+    _all_oe_subs  = db.cargar_subrubros_egresos()
+    _all_oe_items = db.cargar_items_egresos()
+    _oe_subs_by_rubro: dict = {}
+    for _s in _all_oe_subs:
+        _oe_subs_by_rubro.setdefault(_s["rubro_id"], []).append(_s)
+    _oe_items_by_sub: dict = {}
+    for _i in _all_oe_items:
+        _oe_items_by_sub.setdefault(_i["subrubro_id"], []).append(_i)
 
-        _rubros_eg = db.cargar_rubros_egresos()
-        _rmap_eg   = {r["nombre"]: r["id"] for r in _rubros_eg}
-        _re_sel    = st.selectbox("Rubro", ["— sin rubro —"] + list(_rmap_eg.keys()), key="ne_rubro")
-        _re_id     = _rmap_eg.get(_re_sel)
+    _oe_tab1, _oe_tab2, _oe_tab3 = st.tabs(["➕ Ingresar", "✏️ Editar / Eliminar", "📋 Todos los egresos"])
 
-        _sub_eg_opts = db.cargar_subrubros_egresos(_re_id) if _re_id else []
-        _smap_eg     = {s["nombre"]: s["id"] for s in _sub_eg_opts}
-        _se_sel      = st.selectbox("Subrubro", ["— sin subrubro —"] + list(_smap_eg.keys()), key="ne_sub")
-        _se_id       = _smap_eg.get(_se_sel)
+    with _oe_tab1:
+        @st.fragment
+        def _oe_nuevo():
+            _seed = st.session_state.get("ne_seed", 0)
+            _pfx  = f"ne{_seed}"
+            _fecha_def = st.session_state.pop("ne_fecha_keep", date.today())
+            with st.container(border=True):
+                _f = _render_fields_jerarquia("egreso", _pfx, _oe_subs_by_rubro, _oe_items_by_sub,
+                                              _oe_rubro_opts, _oe_caja_opts, defaults={"fecha": _fecha_def})
+                if st.button("Guardar egreso", type="primary", key=f"ne_guardar{_seed}"):
+                    if not _f["rubro"]:
+                        st.error("Seleccioná un rubro.")
+                    elif not _f["subrubro"]:
+                        st.error("Seleccioná un subrubro.")
+                    elif not _f["item_id"]:
+                        st.error("Seleccioná un ítem.")
+                    elif _f["monto"] <= 0:
+                        st.error("El monto debe ser mayor a 0.")
+                    else:
+                        try:
+                            db.guardar_egreso(
+                                fecha=_f["fecha"],
+                                rubro_id=_oe_rubro_opts.get(_f["rubro"]),
+                                subrubro_id=_f["sub_opts"].get(_f["subrubro"]),
+                                item_id=_f["item_id"],
+                                monto=_f["monto"],
+                                caja_id=_oe_caja_opts.get(_f["caja"]),
+                                descripcion=_f["desc"],
+                            )
+                            st.session_state["ne_fecha_keep"] = _f["fecha"]
+                            st.session_state["ne_seed"] = _seed + 1
+                            st.session_state["oe_ok"] = True
+                            st.rerun(scope="fragment")
+                        except Exception as e:
+                            st.error(f"Error: {e}")
+                if st.session_state.pop("oe_ok", False):
+                    st.success("✅ Egreso guardado.")
+        _oe_nuevo()
 
-        _item_eg_opts = db.cargar_items_egresos(_se_id) if _se_id else []
-        _imap_eg      = {it["nombre"]: it["id"] for it in _item_eg_opts}
-        _ie_sel       = st.selectbox("Ítem", ["— sin ítem —"] + list(_imap_eg.keys()), key="ne_item")
-        _ie_id        = _imap_eg.get(_ie_sel)
+    with _oe_tab2:
+        @st.fragment
+        def _oe_editar():
+            _lista = db.cargar_egresos()
+            if not _lista:
+                st.info("No hay egresos cargados todavía.")
+                return
+            with st.form("oe_filt", border=False):
+                _dc1, _dc2 = st.columns(2)
+                _oe_e_desde = _dc1.date_input("Desde", value=date(date.today().year, date.today().month, 1), format="DD/MM/YYYY", key="oe_e_desde")
+                _oe_e_hasta = _dc2.date_input("Hasta", value=date.today(), format="DD/MM/YYYY", key="oe_e_hasta")
+                st.form_submit_button("🔄 Actualizar", type="primary")
+            _lista = [o for o in _lista if _oe_e_desde <= _safe_date(o.get("fecha")) <= _oe_e_hasta]
+            if not _lista:
+                st.caption("Sin registros en el rango.")
+                return
 
-        _cajas_eg = db.cargar_cajas()
-        _cmap_eg  = {c["nombre"]: c["id"] for c in _cajas_eg}
-        _ce_sel   = st.selectbox("Caja", ["— sin caja —"] + list(_cmap_eg.keys()), key="ne_caja")
-        _ce_id    = _cmap_eg.get(_ce_sel)
+            _rubros_en = sorted({(o.get("rubros_egresos") or {}).get("nombre") or "—" for o in _lista})
+            _fil_r = st.selectbox("Rubro", ["Todos"] + _rubros_en, key="oe_fil_r")
+            if _fil_r != "Todos":
+                _lista = [o for o in _lista if (o.get("rubros_egresos") or {}).get("nombre") == _fil_r]
+            _subs_en = sorted({(o.get("subrubros_egresos") or {}).get("nombre") or "—" for o in _lista})
+            _fil_s = st.selectbox("Subrubro", ["Todos"] + _subs_en, key="oe_fil_s")
+            if _fil_s != "Todos":
+                _lista = [o for o in _lista if (o.get("subrubros_egresos") or {}).get("nombre") == _fil_s]
 
-        _desc_e = st.text_input("Descripción (opcional)", key="ne_desc")
-        if st.button("💾 Guardar egreso", type="primary", key="ne_save"):
-            if _me <= 0:
-                st.error("El monto debe ser mayor a 0.")
-            else:
-                db.guardar_egreso(_fe, _re_id, _se_id, _ie_id, _ce_id, _me, _desc_e)
-                st.success("✅ Egreso guardado.")
-                st.rerun()
+            for _oe in _lista:
+                _oe_id  = _oe["id"]
+                _r_nm   = (_oe.get("rubros_egresos") or {}).get("nombre") or _oe_rubro_map.get(_oe.get("rubro_id"), "—")
+                _s_nm   = (_oe.get("subrubros_egresos") or {}).get("nombre") or "—"
+                _it_nm  = (_oe.get("items_egresos") or {}).get("nombre") or ""
+                _cj_nm  = _oe_caja_map.get(_oe.get("caja_id"), "—")
+                _mn     = float(_oe.get("monto") or 0)
+                _fch    = _oe.get("fecha", "")
+                with st.container(border=True):
+                    _ca, _cb, _cc = st.columns([5, 1, 1])
+                    _it_str = f" · {_it_nm}" if _it_nm else ""
+                    _ca.markdown(f"**{_fmt_fecha(_fch)}** · {_r_nm} / {_s_nm}{_it_str} · **$ {_mn:,.0f}** · {_cj_nm}")
+                    if _cb.button("✏️", key=f"oe_edit_{_oe_id}"):
+                        st.session_state[f"oe_editing_{_oe_id}"] = True
+                        st.rerun(scope="fragment")
+                    if _cc.button("🗑️", key=f"oe_del_{_oe_id}"):
+                        db.eliminar_egreso(_oe_id)
+                        st.rerun(scope="fragment")
+                if st.session_state.get(f"oe_editing_{_oe_id}"):
+                    with st.container(border=True):
+                        _e = _render_fields_jerarquia("egreso", f"oee{_oe_id}", _oe_subs_by_rubro, _oe_items_by_sub,
+                                                      _oe_rubro_opts, _oe_caja_opts, defaults={
+                                                          "fecha": _safe_date(_fch) or date.today(),
+                                                          "rubro_nm": _r_nm, "sub_nm": _s_nm, "item_nm": _it_nm,
+                                                          "monto_str": str(_mn), "caja_nm": _cj_nm,
+                                                          "desc": _oe.get("descripcion") or "",
+                                                      })
+                        _ec1, _ec2 = st.columns(2)
+                        if _ec1.button("Guardar", type="primary", key=f"oe_save_{_oe_id}"):
+                            if not _e["rubro"] or not _e["item_id"] or _e["monto"] <= 0:
+                                st.error("Completá rubro, ítem y monto.")
+                            else:
+                                db.actualizar_egreso(_oe_id, _e["fecha"],
+                                    _oe_rubro_opts.get(_e["rubro"]),
+                                    _e["sub_opts"].get(_e["subrubro"]),
+                                    _e["item_id"],
+                                    _oe_caja_opts.get(_e["caja"]),
+                                    _e["monto"], _e["desc"])
+                                st.session_state.pop(f"oe_editing_{_oe_id}", None)
+                                st.rerun(scope="fragment")
+                        if _ec2.button("Cancelar", key=f"oe_cancel_{_oe_id}"):
+                            st.session_state.pop(f"oe_editing_{_oe_id}", None)
+                            st.rerun(scope="fragment")
+        _oe_editar()
 
-    # Listado
-    _d1e, _d2e = _mes_actual()
-    c1, c2, _ = st.columns([1, 1, 3])
-    _desde_e = c1.date_input("Desde", value=_d1e, format="DD/MM/YYYY", key="e_desde")
-    _hasta_e = c2.date_input("Hasta", value=_d2e, format="DD/MM/YYYY", key="e_hasta")
-
-    _lista_e = db.cargar_egresos(_desde_e, _hasta_e)
-    if _lista_e:
-        for _row in _lista_e:
-            with st.expander(f"{_row['fecha']}  |  {_nombre_rubro(_row, 'egreso')}  |  {fmt(_row['monto'])}"):
-                ce1, ce2 = st.columns(2)
-                ce1.write(f"**Subrubro:** {_nombre_subrubro(_row, 'egreso')}")
-                ce1.write(f"**Ítem:** {_nombre_item(_row, 'egreso')}")
-                ce2.write(f"**Caja:** {_nombre_caja(_row)}")
-                ce2.write(f"**Descripción:** {_row.get('descripcion') or '—'}")
-
-                _eid = _row["id"]
-                ec1, ec2 = st.columns(2)
-                _ef2 = ec1.date_input("Fecha", value=date.fromisoformat(_row["fecha"]), format="DD/MM/YYYY", key=f"ee_{_eid}_f")
-                _em2 = ec2.number_input("Monto", value=float(_row["monto"]), step=100.0, format="%.2f", key=f"ee_{_eid}_m")
-
-                _rubros_ee = db.cargar_rubros_egresos()
-                _rmap_ee   = {r["nombre"]: r["id"] for r in _rubros_ee}
-                _er2_opts  = ["— sin rubro —"] + list(_rmap_ee.keys())
-                _er2_actual = _nombre_rubro(_row, "egreso") if _nombre_rubro(_row, "egreso") != "—" else "— sin rubro —"
-                _er2_sel   = st.selectbox("Rubro", _er2_opts, index=_er2_opts.index(_er2_actual) if _er2_actual in _er2_opts else 0, key=f"ee_{_eid}_r")
-                _er2_id    = _rmap_ee.get(_er2_sel)
-
-                _sub_ee_opts = db.cargar_subrubros_egresos(_er2_id) if _er2_id else []
-                _smap_ee     = {s["nombre"]: s["id"] for s in _sub_ee_opts}
-                _es2_opts    = ["— sin subrubro —"] + list(_smap_ee.keys())
-                _es2_actual  = _nombre_subrubro(_row, "egreso") if _nombre_subrubro(_row, "egreso") != "—" else "— sin subrubro —"
-                _es2_sel     = st.selectbox("Subrubro", _es2_opts, index=_es2_opts.index(_es2_actual) if _es2_actual in _es2_opts else 0, key=f"ee_{_eid}_s")
-                _es2_id      = _smap_ee.get(_es2_sel)
-
-                _item_ee_opts = db.cargar_items_egresos(_es2_id) if _es2_id else []
-                _imap_ee      = {it["nombre"]: it["id"] for it in _item_ee_opts}
-                _ei2_opts     = ["— sin ítem —"] + list(_imap_ee.keys())
-                _ei2_actual   = _nombre_item(_row, "egreso") if _nombre_item(_row, "egreso") != "—" else "— sin ítem —"
-                _ei2_sel      = st.selectbox("Ítem", _ei2_opts, index=_ei2_opts.index(_ei2_actual) if _ei2_actual in _ei2_opts else 0, key=f"ee_{_eid}_i")
-                _ei2_id       = _imap_ee.get(_ei2_sel)
-
-                _cajas_ee = db.cargar_cajas()
-                _cmap_ee  = {c["nombre"]: c["id"] for c in _cajas_ee}
-                _ec2_opts = ["— sin caja —"] + list(_cmap_ee.keys())
-                _ec2_actual = _nombre_caja(_row) if _nombre_caja(_row) != "—" else "— sin caja —"
-                _ec2_sel   = st.selectbox("Caja", _ec2_opts, index=_ec2_opts.index(_ec2_actual) if _ec2_actual in _ec2_opts else 0, key=f"ee_{_eid}_c")
-                _ec2_id    = _cmap_ee.get(_ec2_sel)
-
-                _ed2 = st.text_input("Descripción", value=_row.get("descripcion") or "", key=f"ee_{_eid}_d")
-
-                bc1, bc2 = st.columns(2)
-                if bc1.button("💾 Guardar", key=f"ee_{_eid}_upd"):
-                    db.actualizar_egreso(_row["id"], _ef2, _er2_id, _es2_id, _ei2_id, _ec2_id, _em2, _ed2)
-                    st.success("✅ Actualizado.")
-                    st.rerun()
-                if bc2.button("🗑️ Eliminar", key=f"ee_{_eid}_del"):
-                    db.eliminar_egreso(_row["id"])
-                    st.rerun()
-    else:
-        st.info("Sin egresos en el período.")
+    with _oe_tab3:
+        @st.fragment
+        def _oe_todos():
+            _lista = db.cargar_egresos()
+            if not _lista:
+                st.info("No hay egresos cargados todavía.")
+                return
+            with st.form("oe_all_filt", border=False):
+                _dc1, _dc2 = st.columns(2)
+                _oe_v_desde = _dc1.date_input("Desde", value=date(date.today().year, date.today().month, 1), format="DD/MM/YYYY", key="oe_v_desde")
+                _oe_v_hasta = _dc2.date_input("Hasta", value=date.today(), format="DD/MM/YYYY", key="oe_v_hasta")
+                st.form_submit_button("🔄 Actualizar", type="primary")
+            _lista = [o for o in _lista if _oe_v_desde <= _safe_date(o.get("fecha")) <= _oe_v_hasta]
+            if not _lista:
+                st.caption("Sin registros en el rango.")
+                return
+            _by_rub: dict = {}
+            for _oe in _lista:
+                _r = (_oe.get("rubros_egresos") or {}).get("nombre") or "—"
+                _s = (_oe.get("subrubros_egresos") or {}).get("nombre") or "—"
+                _it = (_oe.get("items_egresos") or {}).get("nombre") or "—"
+                _by_rub.setdefault(_r, {}).setdefault(_s, {}).setdefault(_it, []).append(_oe)
+            _total = sum(float(x.get("monto") or 0) for x in _lista)
+            st.metric("Total", fmt(_total))
+            for _r_nm, _subs in sorted(_by_rub.items()):
+                _r_tot = sum(float(x.get("monto") or 0) for s in _subs.values() for items in s.values() for x in items)
+                with st.expander(f"{_r_nm} — $ {_r_tot:,.0f}"):
+                    for _s_nm, _s_items in sorted(_subs.items()):
+                        _s_tot = sum(float(x.get("monto") or 0) for items in _s_items.values() for x in items)
+                        with st.expander(f"{_s_nm} — $ {_s_tot:,.0f}"):
+                            for _it_nm, _it_items in sorted(_s_items.items()):
+                                _it_tot = sum(float(x.get("monto") or 0) for x in _it_items)
+                                with st.expander(f"{_it_nm} — $ {_it_tot:,.0f}"):
+                                    _rows = [{"Fecha": _fmt_fecha(_oe.get("fecha")),
+                                              "Monto": float(_oe.get("monto") or 0),
+                                              "Caja": _oe_caja_map.get(_oe.get("caja_id"), "—"),
+                                              "Descripción": _oe.get("descripcion") or ""}
+                                             for _oe in sorted(_it_items, key=lambda x: str(x.get("fecha") or ""), reverse=True)]
+                                    st.dataframe(pd.DataFrame(_rows), hide_index=True, use_container_width=True,
+                                                 column_config={"Monto": st.column_config.NumberColumn("Monto ($)", format="$ %,.0f")})
+        _oe_todos()
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
