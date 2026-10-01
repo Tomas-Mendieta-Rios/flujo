@@ -65,6 +65,24 @@ def _nombre_item(row, tipo):
     return i["nombre"] if isinstance(i, dict) else "—"
 
 
+def _safe_date(val):
+    if not val:
+        return date.min
+    try:
+        return pd.to_datetime(val).date()
+    except Exception:
+        return date.min
+
+
+def _fmt_fecha(val):
+    if not val:
+        return "—"
+    try:
+        return pd.to_datetime(val).strftime("%d/%m/%Y")
+    except Exception:
+        return str(val)
+
+
 # ── Tabs principales ──────────────────────────────────────────────────────────
 
 tab_percibido, tab_movimientos, tab_ingresos, tab_egresos, tab_transferencias, tab_ajustes, tab_config = st.tabs([
@@ -312,22 +330,6 @@ with tab_movimientos:
 # ═══════════════════════════════════════════════════════════════════════════════
 # HELPERS JERARQUÍA (compartidos por ingresos y egresos)
 # ═══════════════════════════════════════════════════════════════════════════════
-
-def _safe_date(val):
-    if not val:
-        return date.min
-    try:
-        return pd.to_datetime(val).date()
-    except Exception:
-        return date.min
-
-def _fmt_fecha(val):
-    if not val:
-        return "—"
-    try:
-        return pd.to_datetime(val).strftime("%d/%m/%Y")
-    except Exception:
-        return str(val)
 
 def _render_fields_jerarquia(tipo, pfx, subs_by_rubro, items_by_sub, rubro_opts, caja_opts, defaults=None, show_tipo=False):
     """Renderiza fecha, rubro→subrubro→item, monto, caja, descripción. Retorna dict con los valores."""
