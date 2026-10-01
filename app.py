@@ -85,8 +85,9 @@ def _fmt_fecha(val):
 
 # ── Tabs principales ──────────────────────────────────────────────────────────
 
-tab_percibido, tab_movimientos, tab_ingresos, tab_egresos, tab_transferencias, tab_ajustes, tab_config = st.tabs([
+tab_percibido, tab_comparativo, tab_movimientos, tab_ingresos, tab_egresos, tab_transferencias, tab_ajustes, tab_config = st.tabs([
     "📊 Percibido",
+    "📅 Comparativo",
     "📋 Movimientos",
     "💰 Ingresos",
     "💸 Egresos",
@@ -192,6 +193,130 @@ with tab_percibido:
         _render_percibido("ARS")
     with _ptab_usd:
         _render_percibido("USD")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# COMPARATIVO
+# ═══════════════════════════════════════════════════════════════════════════════
+
+with tab_comparativo:
+    _hoy = date.today()
+    _comp_d1 = date(_hoy.year, 1, 1)
+    c1, c2, _ = st.columns([1, 1, 3])
+    _comp_desde = c1.date_input("Desde", value=_comp_d1, format="DD/MM/YYYY", key="comp_desde")
+    _comp_hasta = c2.date_input("Hasta", value=_hoy,    format="DD/MM/YYYY", key="comp_hasta")
+
+    _comp_ing_all  = db.cargar_ingresos(_comp_desde, _comp_hasta)
+    _comp_egr_all  = db.cargar_egresos(_comp_desde,  _comp_hasta)
+    _comp_cajas    = db.cargar_cajas()
+
+    def _mes_label(ym):
+        """'2026-09' → 'Sep 26'"""
+        try:
+            return pd.to_datetime(ym + "-01").strftime("%b %y")
+        except Exception:
+            return ym
+
+    def _render_comparativo(moneda):
+        _ids_m = {c["id"] for c in _comp_cajas if c.get("moneda", "ARS") == moneda}
+        _sym   = "USD" if moneda == "USD" else "$"
+
+        _ing  = [r for r in _comp_ing_all if r.get("caja_id") in _ids_m]
+        _egr_g = [r for r in _comp_egr_all if r.get("caja_id") in _ids_m and r.get("tipo","gasto") == "gasto"]
+        _egr_i = [r for r in _comp_egr_all if r.get("caja_id") in _ids_m and r.get("tipo") == "inversion"]
+
+        def _meses(rows):
+            return sorted({r["fecha"][:7] for r in rows if r.get("fecha")})
+
+        _todos_meses = sorted({r["fecha"][:7] for r in _ing + _egr_g + _egr_i if r.get("fecha")})
+        if not _todos_meses:
+            st.info("Sin datos en el período.")
+            return
+
+        _cols_label = {m: _mes_label(m) for m in _todos_meses}
+
+        # ── Resumen por mes ─────────────────────────────────────────────────
+        st.markdown("#### Resumen mensual")
+        _summary_rows = []
+        for _m in _todos_meses:
+            _ti = sum(float(r.get("monto") or 0) for r in _ing   if r["fecha"][:7] == _m)
+            _tg = sum(float(r.get("monto") or 0) for r in _egr_g if r["fecha"][:7] == _m)
+            _tv = sum(float(r.get("monto") or 0) for r in _egr_i if r["fecha"][:7] == _m)
+            _summary_rows.append({
+                "Mes":        _cols_label[_m],
+                "Ingresos":   _ti,
+                "Gastos":     _tg,
+                "Inversiones": _tv,
+                "Neto":       _ti - _tg,
+            })
+        _df_sum = pd.DataFrame(_summary_rows)
+        # Fila de totales
+        _tot_row = {"Mes": "TOTAL",
+                    "Ingresos":    _df_sum["Ingresos"].sum(),
+                    "Gastos":      _df_sum["Gastos"].sum(),
+                    "Inversiones": _df_sum["Inversiones"].sum(),
+                    "Neto":        _df_sum["Neto"].sum()}
+        _df_sum = pd.concat([_df_sum, pd.DataFrame([_tot_row])], ignore_index=True)
+        _fmt_c = f"{_sym} %,.0f"
+        st.dataframe(_df_sum, hide_index=True, use_container_width=True, column_config={
+            "Ingresos":    st.column_config.NumberColumn("Ingresos",    format=_fmt_c),
+            "Gastos":      st.column_config.NumberColumn("Gastos",      format=_fmt_c),
+            "Inversiones": st.column_config.NumberColumn("Inversiones", format=_fmt_c),
+            "Neto":        st.column_config.NumberColumn("Neto",        format=_fmt_c),
+        })
+
+        # ── Pivot por rubro ─────────────────────────────────────────────────
+        def _pivot_rubro(rows, tipo):
+            if not rows:
+                return None
+            _data = [{"Mes": r["fecha"][:7],
+                      "Rubro": _nombre_rubro(r, tipo),
+                      "Monto": float(r.get("monto") or 0)} for r in rows]
+            _df = pd.DataFrame(_data)
+            _piv = _df.pivot_table(values="Monto", index="Rubro",
+                                   columns="Mes", aggfunc="sum", fill_value=0)
+            _piv.columns = [_cols_label.get(c, c) for c in _piv.columns]
+            _piv["Total"] = _piv.sum(axis=1)
+            _piv = _piv.sort_values("Total", ascending=False)
+            _tot = _piv.sum()
+            _tot.name = "TOTAL"
+            _piv = pd.concat([_piv, _tot.to_frame().T])
+            return _piv.reset_index().rename(columns={"Rubro": "Rubro", "index": "Rubro"})
+
+        st.divider()
+        st.markdown("#### Ingresos por rubro")
+        _piv_i = _pivot_rubro(_ing, "ingreso")
+        if _piv_i is not None:
+            _num_cols_i = {c: st.column_config.NumberColumn(c, format=_fmt_c)
+                           for c in _piv_i.columns if c != "Rubro"}
+            st.dataframe(_piv_i, hide_index=True, use_container_width=True, column_config=_num_cols_i)
+        else:
+            st.caption("Sin ingresos.")
+
+        st.divider()
+        st.markdown("#### Gastos por rubro")
+        _piv_g = _pivot_rubro(_egr_g, "egreso")
+        if _piv_g is not None:
+            _num_cols_g = {c: st.column_config.NumberColumn(c, format=_fmt_c)
+                           for c in _piv_g.columns if c != "Rubro"}
+            st.dataframe(_piv_g, hide_index=True, use_container_width=True, column_config=_num_cols_g)
+        else:
+            st.caption("Sin gastos.")
+
+        if _egr_i:
+            st.divider()
+            st.markdown("#### Inversiones por rubro")
+            _piv_v = _pivot_rubro(_egr_i, "egreso")
+            if _piv_v is not None:
+                _num_cols_v = {c: st.column_config.NumberColumn(c, format=_fmt_c)
+                               for c in _piv_v.columns if c != "Rubro"}
+                st.dataframe(_piv_v, hide_index=True, use_container_width=True, column_config=_num_cols_v)
+
+    _ctab_ars, _ctab_usd = st.tabs(["🇦🇷 Pesos (ARS)", "🇺🇸 Dólares (USD)"])
+    with _ctab_ars:
+        _render_comparativo("ARS")
+    with _ctab_usd:
+        _render_comparativo("USD")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
