@@ -265,52 +265,67 @@ with tab_comparativo:
             "Neto":        st.column_config.NumberColumn("Neto",        format=_fmt_c),
         })
 
-        # ── Pivot por rubro ─────────────────────────────────────────────────
-        def _pivot_rubro(rows, tipo):
+        # ── Detalle rubro → subrubro → item × mes ──────────────────────────
+        def _jerarquia_mmap(rows, tipo):
+            """Devuelve {rubro: {sub: {item: {mes: monto}}}}"""
+            _tree: dict = {}
+            for r in rows:
+                _rn  = _nombre_rubro(r, tipo)
+                _sn  = _nombre_subrubro(r, tipo)
+                _itn = _nombre_item(r, tipo)
+                _m   = (r.get("fecha") or "")[:7]
+                _mn  = float(r.get("monto") or 0)
+                _tree.setdefault(_rn, {}).setdefault(_sn, {}).setdefault(_itn, {})
+                _tree[_rn][_sn][_itn][_m] = _tree[_rn][_sn][_itn].get(_m, 0) + _mn
+            return _tree
+
+        def _piv_df(mmap_item):
+            """Convierte {item: {mes: monto}} en DataFrame con mes-cols + Total."""
+            _rows = []
+            for _itn, _mmap in sorted(mmap_item.items()):
+                _row = {"Ítem": _itn}
+                for _m in _todos_meses:
+                    _row[_cols_label[_m]] = _mmap.get(_m, 0)
+                _row["Total"] = sum(_mmap.values())
+                _rows.append(_row)
+            _tot = {"Ítem": "TOTAL"}
+            for _m in _todos_meses:
+                _tot[_cols_label[_m]] = sum(r[_cols_label[_m]] for r in _rows)
+            _tot["Total"] = sum(r["Total"] for r in _rows)
+            _rows.append(_tot)
+            return pd.DataFrame(_rows)
+
+        def _render_jerarquia(rows, tipo, titulo):
             if not rows:
-                return None
-            _data = [{"Mes": r["fecha"][:7],
-                      "Rubro": _nombre_rubro(r, tipo),
-                      "Monto": float(r.get("monto") or 0)} for r in rows]
-            _df = pd.DataFrame(_data)
-            _piv = _df.pivot_table(values="Monto", index="Rubro",
-                                   columns="Mes", aggfunc="sum", fill_value=0)
-            _piv.columns = [_cols_label.get(c, c) for c in _piv.columns]
-            _piv["Total"] = _piv.sum(axis=1)
-            _piv = _piv.sort_values("Total", ascending=False)
-            _tot = _piv.sum()
-            _tot.name = "TOTAL"
-            _piv = pd.concat([_piv, _tot.to_frame().T])
-            return _piv.reset_index().rename(columns={"Rubro": "Rubro", "index": "Rubro"})
+                st.caption(f"Sin {titulo.lower()}.")
+                return
+            _tree = _jerarquia_mmap(rows, tipo)
+            _num_cfg = {_cols_label[_m]: st.column_config.NumberColumn(_cols_label[_m], format=_fmt_c)
+                        for _m in _todos_meses}
+            _num_cfg["Total"] = st.column_config.NumberColumn("Total", format=_fmt_c)
+
+            for _rn, _subs in sorted(_tree.items()):
+                _r_tot = sum(v for sub in _subs.values() for im in sub.values() for v in im.values())
+                with st.expander(f"{_rn.upper()} — {fmt(_r_tot, moneda)}"):
+                    for _sn, _items in sorted(_subs.items()):
+                        _s_tot = sum(v for im in _items.values() for v in im.values())
+                        with st.expander(f"{_sn.upper()} — {fmt(_s_tot, moneda)}"):
+                            _df = _piv_df(_items)
+                            st.dataframe(_df, hide_index=True, use_container_width=True,
+                                         column_config=_num_cfg)
 
         st.divider()
-        st.markdown("#### Ingresos por rubro")
-        _piv_i = _pivot_rubro(_ing, "ingreso")
-        if _piv_i is not None:
-            _num_cols_i = {c: st.column_config.NumberColumn(c, format=_fmt_c)
-                           for c in _piv_i.columns if c != "Rubro"}
-            st.dataframe(_piv_i, hide_index=True, use_container_width=True, column_config=_num_cols_i)
-        else:
-            st.caption("Sin ingresos.")
+        st.markdown("#### Ingresos")
+        _render_jerarquia(_ing, "ingreso", "Ingresos")
 
         st.divider()
-        st.markdown("#### Gastos por rubro")
-        _piv_g = _pivot_rubro(_egr_g, "egreso")
-        if _piv_g is not None:
-            _num_cols_g = {c: st.column_config.NumberColumn(c, format=_fmt_c)
-                           for c in _piv_g.columns if c != "Rubro"}
-            st.dataframe(_piv_g, hide_index=True, use_container_width=True, column_config=_num_cols_g)
-        else:
-            st.caption("Sin gastos.")
+        st.markdown("#### Gastos")
+        _render_jerarquia(_egr_g, "egreso", "Gastos")
 
         if _egr_i:
             st.divider()
-            st.markdown("#### Inversiones por rubro")
-            _piv_v = _pivot_rubro(_egr_i, "egreso")
-            if _piv_v is not None:
-                _num_cols_v = {c: st.column_config.NumberColumn(c, format=_fmt_c)
-                               for c in _piv_v.columns if c != "Rubro"}
-                st.dataframe(_piv_v, hide_index=True, use_container_width=True, column_config=_num_cols_v)
+            st.markdown("#### Inversiones")
+            _render_jerarquia(_egr_i, "egreso", "Inversiones")
 
     _ctab_ars, _ctab_usd = st.tabs(["🇦🇷 Pesos (ARS)", "🇺🇸 Dólares (USD)"])
     with _ctab_ars:
