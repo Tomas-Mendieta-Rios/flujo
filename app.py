@@ -114,20 +114,25 @@ with tab_percibido:
 
         st.divider()
 
-        _ing_rows = [{"Rubro": _nombre_rubro(r, "ingreso"), "Monto": float(r.get("monto") or 0)} for r in _ing]
-        _egr_rows = [{"Rubro": _nombre_rubro(r, "egreso"),  "Monto": float(r.get("monto") or 0)} for r in _egr]
+        _ing_rows  = [{"Rubro": _nombre_rubro(r, "ingreso"), "Monto": float(r.get("monto") or 0)} for r in _ing]
+        _gasto_rows = [{"Rubro": _nombre_rubro(r, "egreso"), "Monto": float(r.get("monto") or 0)}
+                       for r in _egr if r.get("tipo", "gasto") == "gasto"]
+        _inv_rows   = [{"Rubro": _nombre_rubro(r, "egreso"), "Monto": float(r.get("monto") or 0)}
+                       for r in _egr if r.get("tipo") == "inversion"]
 
-        _total_ing = sum(r["Monto"] for r in _ing_rows)
-        _total_egr = sum(r["Monto"] for r in _egr_rows)
-        _neto      = _total_ing - _total_egr
+        _total_ing  = sum(r["Monto"] for r in _ing_rows)
+        _total_gasto = sum(r["Monto"] for r in _gasto_rows)
+        _total_inv  = sum(r["Monto"] for r in _inv_rows)
+        _neto       = _total_ing - _total_gasto  # inversiones no entran en el neto del día a día
 
-        col_i, col_e, col_n = st.columns(3)
-        col_i.metric("Ingresos del período", fmt(_total_ing, moneda))
-        col_e.metric("Egresos del período",  fmt(_total_egr, moneda))
-        col_n.metric("Neto",                 fmt(_neto, moneda))
+        col_i, col_g, col_inv, col_n = st.columns(4)
+        col_i.metric("Ingresos",    fmt(_total_ing,   moneda))
+        col_g.metric("Gastos",      fmt(_total_gasto, moneda))
+        col_inv.metric("Inversiones", fmt(_total_inv, moneda))
+        col_n.metric("Neto (sin inv.)", fmt(_neto, moneda))
 
         st.divider()
-        ci, ce = st.columns(2)
+        ci, ce, cinv = st.columns(3)
         with ci:
             st.markdown("**Ingresos por rubro**")
             if _ing_rows:
@@ -138,14 +143,23 @@ with tab_percibido:
             else:
                 st.info("Sin ingresos en el período.")
         with ce:
-            st.markdown("**Egresos por rubro**")
-            if _egr_rows:
-                _df_e = (pd.DataFrame(_egr_rows).groupby("Rubro", as_index=False)["Monto"].sum()
+            st.markdown("**Gastos por rubro**")
+            if _gasto_rows:
+                _df_e = (pd.DataFrame(_gasto_rows).groupby("Rubro", as_index=False)["Monto"].sum()
                            .sort_values("Monto", ascending=False))
                 _df_e["Monto"] = _df_e["Monto"].apply(lambda v: fmt(v, moneda))
                 st.dataframe(_df_e, hide_index=True, use_container_width=True)
             else:
-                st.info("Sin egresos en el período.")
+                st.info("Sin gastos en el período.")
+        with cinv:
+            st.markdown("**Inversiones por rubro**")
+            if _inv_rows:
+                _df_inv = (pd.DataFrame(_inv_rows).groupby("Rubro", as_index=False)["Monto"].sum()
+                             .sort_values("Monto", ascending=False))
+                _df_inv["Monto"] = _df_inv["Monto"].apply(lambda v: fmt(v, moneda))
+                st.dataframe(_df_inv, hide_index=True, use_container_width=True)
+            else:
+                st.info("Sin inversiones en el período.")
 
     _ptab_ars, _ptab_usd = st.tabs(["🇦🇷 Pesos (ARS)", "🇺🇸 Dólares (USD)"])
     with _ptab_ars:
@@ -229,7 +243,7 @@ def _fmt_fecha(val):
     except Exception:
         return str(val)
 
-def _render_fields_jerarquia(tipo, pfx, subs_by_rubro, items_by_sub, rubro_opts, caja_opts, defaults=None):
+def _render_fields_jerarquia(tipo, pfx, subs_by_rubro, items_by_sub, rubro_opts, caja_opts, defaults=None, show_tipo=False):
     """Renderiza fecha, rubro→subrubro→item, monto, caja, descripción. Retorna dict con los valores."""
     d = defaults or {}
     fecha  = st.date_input("Fecha", value=d.get("fecha", date.today()), format="DD/MM/YYYY", key=f"{pfx}_fecha")
@@ -253,9 +267,17 @@ def _render_fields_jerarquia(tipo, pfx, subs_by_rubro, items_by_sub, rubro_opts,
     c_idx  = caja_list.index(d.get("caja_nm", "")) if d.get("caja_nm") in caja_list else 0
     caja   = st.selectbox("Caja", caja_list, index=c_idx, key=f"{pfx}_caja")
     desc   = st.text_input("Descripción (opcional)", value=d.get("desc", ""), key=f"{pfx}_desc")
+    if show_tipo:
+        _tipo_list = ["gasto", "inversion"]
+        _t_idx = _tipo_list.index(d.get("tipo", "gasto")) if d.get("tipo") in _tipo_list else 0
+        egreso_tipo = st.selectbox("Tipo", _tipo_list, index=_t_idx,
+                                   format_func=lambda x: "💸 Gasto" if x == "gasto" else "📈 Inversión",
+                                   key=f"{pfx}_tipo")
+    else:
+        egreso_tipo = d.get("tipo", "gasto")
     return {"fecha": fecha, "rubro": rubro, "sub_opts": sub_opts, "subrubro": subrubro,
             "item_nm": item_nm, "item_id": item_map.get(item_nm),
-            "monto": monto, "caja": caja, "desc": desc}
+            "monto": monto, "caja": caja, "desc": desc, "tipo": egreso_tipo}
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -455,7 +477,7 @@ with tab_egresos:
             _fecha_def = st.session_state.pop("ne_fecha_keep", date.today())
             with st.container(border=True):
                 _f = _render_fields_jerarquia("egreso", _pfx, _oe_subs_by_rubro, _oe_items_by_sub,
-                                              _oe_rubro_opts, _oe_caja_opts, defaults={"fecha": _fecha_def})
+                                              _oe_rubro_opts, _oe_caja_opts, defaults={"fecha": _fecha_def}, show_tipo=True)
                 if st.button("Guardar egreso", type="primary", key=f"ne_guardar{_seed}"):
                     if not _f["rubro"]:
                         st.error("Seleccioná un rubro.")
@@ -475,6 +497,7 @@ with tab_egresos:
                                 monto=_f["monto"],
                                 caja_id=_oe_caja_opts.get(_f["caja"]),
                                 descripcion=_f["desc"],
+                                tipo=_f["tipo"],
                             )
                             st.session_state["ne_fecha_keep"] = _f["fecha"]
                             st.session_state["ne_seed"] = _seed + 1
@@ -538,7 +561,8 @@ with tab_egresos:
                                                           "rubro_nm": _r_nm, "sub_nm": _s_nm, "item_nm": _it_nm,
                                                           "monto_str": str(_mn), "caja_nm": _cj_nm,
                                                           "desc": _oe.get("descripcion") or "",
-                                                      })
+                                                          "tipo": _oe.get("tipo", "gasto"),
+                                                      }, show_tipo=True)
                         _ec1, _ec2 = st.columns(2)
                         if _ec1.button("Guardar", type="primary", key=f"oe_save_{_oe_id}"):
                             if not _e["rubro"] or not _e["item_id"] or _e["monto"] <= 0:
@@ -549,7 +573,7 @@ with tab_egresos:
                                     _e["sub_opts"].get(_e["subrubro"]),
                                     _e["item_id"],
                                     _oe_caja_opts.get(_e["caja"]),
-                                    _e["monto"], _e["desc"])
+                                    _e["monto"], _e["desc"], _e["tipo"])
                                 st.session_state.pop(f"oe_editing_{_oe_id}", None)
                                 st.rerun(scope="fragment")
                         if _ec2.button("Cancelar", key=f"oe_cancel_{_oe_id}"):

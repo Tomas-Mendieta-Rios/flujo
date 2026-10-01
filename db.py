@@ -240,7 +240,7 @@ def cargar_egresos(desde=None, hasta=None):
     return q.execute().data or []
 
 
-def guardar_egreso(fecha, rubro_id, subrubro_id, item_id, caja_id, monto, descripcion=""):
+def guardar_egreso(fecha, rubro_id, subrubro_id, item_id, caja_id, monto, descripcion="", tipo="gasto"):
     get_client().table("egresos").insert({
         "fecha":       str(fecha),
         "rubro_id":    rubro_id or None,
@@ -249,11 +249,12 @@ def guardar_egreso(fecha, rubro_id, subrubro_id, item_id, caja_id, monto, descri
         "caja_id":     caja_id or None,
         "monto":       float(monto),
         "descripcion": descripcion or None,
+        "tipo":        tipo,
     }).execute()
     cargar_egresos.clear()
 
 
-def actualizar_egreso(id, fecha, rubro_id, subrubro_id, item_id, caja_id, monto, descripcion=""):
+def actualizar_egreso(id, fecha, rubro_id, subrubro_id, item_id, caja_id, monto, descripcion="", tipo="gasto"):
     get_client().table("egresos").update({
         "fecha":       str(fecha),
         "rubro_id":    rubro_id or None,
@@ -262,6 +263,7 @@ def actualizar_egreso(id, fecha, rubro_id, subrubro_id, item_id, caja_id, monto,
         "caja_id":     caja_id or None,
         "monto":       float(monto),
         "descripcion": descripcion or None,
+        "tipo":        tipo,
     }).eq("id", id).execute()
     cargar_egresos.clear()
 
