@@ -99,85 +99,93 @@ tab_percibido, tab_movimientos, tab_ingresos, tab_egresos, tab_transferencias, t
 # PERCIBIDO
 # ═══════════════════════════════════════════════════════════════════════════════
 
-with tab_percibido:
-    st.subheader("Resumen del período")
+def _render_seccion_jerarquia(lista, tipo, titulo, moneda, color):
+    """Renders a 3-level nested section (rubro→subrubro→item) identical to tab Todos."""
+    _sym = "USD" if moneda == "USD" else "$"
+    _fmt_n = f"{_sym} %,.0f"
+    _total = sum(float(r.get("monto") or 0) for r in lista)
+    st.markdown(
+        f"**{titulo}** · {len(lista)} registros<br>"
+        f"<span style='font-size:0.8em;color:#888'>Total</span><br>"
+        f"<span style='font-size:1.3em;font-weight:700;color:{color}'>{fmt(_total, moneda)}</span>",
+        unsafe_allow_html=True,
+    )
+    if not lista:
+        st.caption("Sin registros en el período.")
+        return _total
+    _by_rub: dict = {}
+    for r in lista:
+        _rn  = _nombre_rubro(r, tipo)
+        _sn  = _nombre_subrubro(r, tipo)
+        _itn = _nombre_item(r, tipo)
+        _by_rub.setdefault(_rn, {}).setdefault(_sn, {}).setdefault(_itn, []).append(r)
+    for _rn, _subs in sorted(_by_rub.items()):
+        _r_tot = sum(float(x.get("monto") or 0) for s in _subs.values() for items in s.values() for x in items)
+        _r_cnt = sum(len(items) for s in _subs.values() for items in s.values())
+        with st.expander(f"{_rn.upper()} ({_r_cnt}) — {fmt(_r_tot, moneda)}"):
+            for _sn, _s_items in sorted(_subs.items()):
+                _s_tot = sum(float(x.get("monto") or 0) for items in _s_items.values() for x in items)
+                _s_cnt = sum(len(items) for items in _s_items.values())
+                with st.expander(f"{_sn.upper()} ({_s_cnt}) — {fmt(_s_tot, moneda)}"):
+                    for _itn, _it_rows in sorted(_s_items.items()):
+                        _it_tot = sum(float(x.get("monto") or 0) for x in _it_rows)
+                        _it_cnt = len(_it_rows)
+                        with st.expander(f"{_itn.upper()} ({_it_cnt}) — {fmt(_it_tot, moneda)}"):
+                            _rows = [{"Fecha": _fmt_fecha(r.get("fecha")),
+                                      "Monto": float(r.get("monto") or 0),
+                                      "Descripción": r.get("descripcion") or ""}
+                                     for r in sorted(_it_rows, key=lambda x: str(x.get("fecha") or ""), reverse=True)]
+                            st.dataframe(pd.DataFrame(_rows), hide_index=True, use_container_width=True,
+                                         column_config={"Monto": st.column_config.NumberColumn("Monto", format=_fmt_n)})
+    return _total
 
+
+with tab_percibido:
     _d1, _d2 = _mes_actual()
     c1, c2, _ = st.columns([1, 1, 3])
     _desde = c1.date_input("Desde", value=_d1, format="DD/MM/YYYY", key="p_desde")
     _hasta = c2.date_input("Hasta", value=_d2, format="DD/MM/YYYY", key="p_hasta")
 
-    _ing_all  = db.cargar_ingresos(_desde, _hasta)
-    _egr_all  = db.cargar_egresos(_desde, _hasta)
-    _trf_all  = db.cargar_transferencias()
-    _aj_all   = db.cargar_ajustes()
+    _ing_all   = db.cargar_ingresos(_desde, _hasta)
+    _egr_all   = db.cargar_egresos(_desde, _hasta)
+    _trf_all   = db.cargar_transferencias()
+    _aj_all    = db.cargar_ajustes()
     _cajas_all = db.cargar_cajas()
-    _cajas_mon = {c["id"]: c.get("moneda", "ARS") for c in _cajas_all}
+    _ing_todo  = db.cargar_ingresos()
+    _egr_todo  = db.cargar_egresos()
 
     def _render_percibido(moneda):
         _cajas_m = [c for c in _cajas_all if c.get("moneda", "ARS") == moneda]
         _ids_m   = {c["id"] for c in _cajas_m}
 
-        _ing  = [r for r in _ing_all  if r.get("caja_id") in _ids_m]
-        _egr  = [r for r in _egr_all  if r.get("caja_id") in _ids_m]
-
         # Saldos actuales
-        _ing_todo = db.cargar_ingresos()
-        _egr_todo = db.cargar_egresos()
-        st.markdown("**Saldo actual por caja**")
-        _saldo_cols = st.columns(max(len(_cajas_m), 1))
-        for i, c in enumerate(_cajas_m):
-            _s = _calcular_saldo_caja(c["id"], _aj_all, _ing_todo, _egr_todo, _trf_all)
-            _saldo_cols[i].metric(c["nombre"], fmt(_s, moneda))
+        if _cajas_m:
+            st.markdown("**Saldo actual por caja**")
+            _saldo_cols = st.columns(max(len(_cajas_m), 1))
+            for i, c in enumerate(_cajas_m):
+                _s = _calcular_saldo_caja(c["id"], _aj_all, _ing_todo, _egr_todo, _trf_all)
+                _saldo_cols[i].metric(c["nombre"], fmt(_s, moneda))
+            st.divider()
+
+        _ing   = [r for r in _ing_all if r.get("caja_id") in _ids_m]
+        _egr_g = [r for r in _egr_all if r.get("caja_id") in _ids_m and r.get("tipo", "gasto") == "gasto"]
+        _egr_i = [r for r in _egr_all if r.get("caja_id") in _ids_m and r.get("tipo") == "inversion"]
+
+        _tot_ing = _render_seccion_jerarquia(_ing,   "ingreso", "Ingresos",   moneda, "#2e7d32")
+        st.divider()
+        _tot_gas = _render_seccion_jerarquia(_egr_g, "egreso",  "Gastos",     moneda, "#c62828")
+        if _egr_i:
+            st.divider()
+            _render_seccion_jerarquia(_egr_i, "egreso", "Inversiones", moneda, "#5e35b1")
 
         st.divider()
-
-        _ing_rows  = [{"Rubro": _nombre_rubro(r, "ingreso"), "Monto": float(r.get("monto") or 0)} for r in _ing]
-        _gasto_rows = [{"Rubro": _nombre_rubro(r, "egreso"), "Monto": float(r.get("monto") or 0)}
-                       for r in _egr if r.get("tipo", "gasto") == "gasto"]
-        _inv_rows   = [{"Rubro": _nombre_rubro(r, "egreso"), "Monto": float(r.get("monto") or 0)}
-                       for r in _egr if r.get("tipo") == "inversion"]
-
-        _total_ing  = sum(r["Monto"] for r in _ing_rows)
-        _total_gasto = sum(r["Monto"] for r in _gasto_rows)
-        _total_inv  = sum(r["Monto"] for r in _inv_rows)
-        _neto       = _total_ing - _total_gasto  # inversiones no entran en el neto del día a día
-
-        col_i, col_g, col_inv, col_n = st.columns(4)
-        col_i.metric("Ingresos",    fmt(_total_ing,   moneda))
-        col_g.metric("Gastos",      fmt(_total_gasto, moneda))
-        col_inv.metric("Inversiones", fmt(_total_inv, moneda))
-        col_n.metric("Neto (sin inv.)", fmt(_neto, moneda))
-
-        st.divider()
-        ci, ce, cinv = st.columns(3)
-        with ci:
-            st.markdown("**Ingresos por rubro**")
-            if _ing_rows:
-                _df_i = (pd.DataFrame(_ing_rows).groupby("Rubro", as_index=False)["Monto"].sum()
-                           .sort_values("Monto", ascending=False))
-                _df_i["Monto"] = _df_i["Monto"].apply(lambda v: fmt(v, moneda))
-                st.dataframe(_df_i, hide_index=True, use_container_width=True)
-            else:
-                st.info("Sin ingresos en el período.")
-        with ce:
-            st.markdown("**Gastos por rubro**")
-            if _gasto_rows:
-                _df_e = (pd.DataFrame(_gasto_rows).groupby("Rubro", as_index=False)["Monto"].sum()
-                           .sort_values("Monto", ascending=False))
-                _df_e["Monto"] = _df_e["Monto"].apply(lambda v: fmt(v, moneda))
-                st.dataframe(_df_e, hide_index=True, use_container_width=True)
-            else:
-                st.info("Sin gastos en el período.")
-        with cinv:
-            st.markdown("**Inversiones por rubro**")
-            if _inv_rows:
-                _df_inv = (pd.DataFrame(_inv_rows).groupby("Rubro", as_index=False)["Monto"].sum()
-                             .sort_values("Monto", ascending=False))
-                _df_inv["Monto"] = _df_inv["Monto"].apply(lambda v: fmt(v, moneda))
-                st.dataframe(_df_inv, hide_index=True, use_container_width=True)
-            else:
-                st.info("Sin inversiones en el período.")
+        _neto = _tot_ing - _tot_gas
+        _color_neto = "#2e7d32" if _neto >= 0 else "#c62828"
+        st.markdown(
+            f"**Neto (Ingresos − Gastos)**<br>"
+            f"<span style='font-size:1.5em;font-weight:700;color:{_color_neto}'>{fmt(_neto, moneda)}</span>",
+            unsafe_allow_html=True,
+        )
 
     _ptab_ars, _ptab_usd = st.tabs(["🇦🇷 Pesos (ARS)", "🇺🇸 Dólares (USD)"])
     with _ptab_ars:
