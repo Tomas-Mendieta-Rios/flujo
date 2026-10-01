@@ -190,111 +190,88 @@ with tab_percibido:
 # MOVIMIENTOS
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def _render_movimientos_caja(caja, desde, hasta, ing_all, egr_all, trf_all, aj_all):
+def _metricas_colores(col, label, valor, moneda, color):
+    col.markdown(
+        f"<div style='font-size:0.78em;color:#888;margin-bottom:2px'>{label}</div>"
+        f"<div style='font-size:1.35em;font-weight:700;color:{color}'>{fmt(valor, moneda)}</div>",
+        unsafe_allow_html=True,
+    )
+
+
+def _render_movimientos_caja(caja, desde, hasta, ing_all, egr_all, trf_all, aj_all, saldo_actual):
     caja_id = caja["id"]
     moneda  = caja.get("moneda", "ARS")
     _sym    = "USD" if moneda == "USD" else "$"
     _fmt_n  = f"{_sym} %,.0f"
+    _ds     = str(desde)
+    _hs     = str(hasta)
 
-    saldo_ini  = 0.0
-    fecha_ini  = None
-    for _a in aj_all:
-        if _a["caja_id"] == caja_id and _a["tipo"] == "inicial":
-            saldo_ini = float(_a["monto"])
-            fecha_ini = _a["fecha"]
-            break
+    def _en(fecha): return _ds <= str(fecha or "") <= _hs
 
-    _rows: list = []
-    for r in ing_all:
-        if r.get("caja_id") != caja_id:
-            continue
-        _m = float(r.get("monto") or 0)
-        _rub = _nombre_rubro(r, "ingreso")
-        _sub = _nombre_subrubro(r, "ingreso")
-        _it  = _nombre_item(r, "ingreso")
-        _con = " / ".join(filter(lambda x: x and x != "—", [_rub, _sub, _it])) or "—"
-        _rows.append({"_f": r["fecha"], "Tipo": "💰 Ingreso", "Concepto": _con,
-                      "Descripción": r.get("descripcion") or "", "_delta": _m})
+    _ing   = [r for r in ing_all  if r.get("caja_id") == caja_id and _en(r.get("fecha"))]
+    _egr_g = [r for r in egr_all  if r.get("caja_id") == caja_id and r.get("tipo","gasto") == "gasto"     and _en(r.get("fecha"))]
+    _egr_i = [r for r in egr_all  if r.get("caja_id") == caja_id and r.get("tipo") == "inversion"         and _en(r.get("fecha"))]
+    _trf_e = [r for r in trf_all  if r.get("destino_id") == caja_id and _en(r.get("fecha"))]
+    _trf_s = [r for r in trf_all  if r.get("origen_id")  == caja_id and _en(r.get("fecha"))]
+    _aj_p  = [r for r in aj_all   if r.get("caja_id") == caja_id and r.get("tipo") == "ajuste"
+              and float(r.get("monto") or 0) > 0 and _en(r.get("fecha"))]
+    _aj_n  = [r for r in aj_all   if r.get("caja_id") == caja_id and r.get("tipo") == "ajuste"
+              and float(r.get("monto") or 0) < 0 and _en(r.get("fecha"))]
 
-    for r in egr_all:
-        if r.get("caja_id") != caja_id:
-            continue
-        _m = float(r.get("monto") or 0)
-        _rub = _nombre_rubro(r, "egreso")
-        _sub = _nombre_subrubro(r, "egreso")
-        _it  = _nombre_item(r, "egreso")
-        _con = " / ".join(filter(lambda x: x and x != "—", [_rub, _sub, _it])) or "—"
-        _tipo = "📈 Inversión" if r.get("tipo") == "inversion" else "💸 Egreso"
-        _rows.append({"_f": r["fecha"], "Tipo": _tipo, "Concepto": _con,
-                      "Descripción": r.get("descripcion") or "", "_delta": -_m})
+    _tot_ent = (sum(float(r.get("monto") or 0) for r in _ing)
+              + sum(float(r.get("monto") or 0) for r in _trf_e)
+              + sum(float(r.get("monto") or 0) for r in _aj_p))
+    _tot_sal = (sum(float(r.get("monto") or 0) for r in _egr_g)
+              + sum(float(r.get("monto") or 0) for r in _egr_i)
+              + sum(float(r.get("monto") or 0) for r in _trf_s)
+              + sum(-float(r.get("monto") or 0) for r in _aj_n))
 
-    for r in trf_all:
-        _orig_n = (r.get("origen") or {}).get("nombre") or "—"
-        _dest_n = (r.get("destino") or {}).get("nombre") or "—"
-        _con    = f"{_orig_n} → {_dest_n}"
-        _desc   = r.get("concepto") or ""
-        _m = float(r.get("monto") or 0)
-        if r.get("origen_id") == caja_id:
-            _rows.append({"_f": r["fecha"], "Tipo": "↗️ Transf. salida",
-                          "Concepto": _con, "Descripción": _desc, "_delta": -_m})
-        if r.get("destino_id") == caja_id:
-            _rows.append({"_f": r["fecha"], "Tipo": "↙️ Transf. entrada",
-                          "Concepto": _con, "Descripción": _desc, "_delta": _m})
-
-    for _a in aj_all:
-        if _a["caja_id"] == caja_id and _a["tipo"] == "ajuste":
-            _m = float(_a.get("monto") or 0)
-            _rows.append({"_f": _a["fecha"], "Tipo": "🔧 Ajuste",
-                          "Concepto": _a.get("nota") or "Ajuste libre",
-                          "Descripción": "", "_delta": _m})
-
-    _rows.sort(key=lambda x: str(x.get("_f") or ""))
-
-    # Saldo acumulado hasta el día anterior al filtro desde
-    _saldo_pre = saldo_ini
-    for r in _rows:
-        _f = str(r.get("_f") or "")
-        if fecha_ini and _f < str(fecha_ini):
-            continue
-        if _f < str(desde):
-            _saldo_pre += r["_delta"]
-
-    _en_periodo = [r for r in _rows
-                   if str(desde) <= str(r.get("_f") or "") <= str(hasta)
-                   and (not fecha_ini or str(r.get("_f") or "") >= str(fecha_ini))]
-
-    _saldo_run = _saldo_pre
-    for r in _en_periodo:
-        _saldo_run += r["_delta"]
-        r["_saldo"] = _saldo_run
-
-    _total_ent = sum(r["_delta"] for r in _en_periodo if r["_delta"] > 0)
-    _total_sal = sum(-r["_delta"] for r in _en_periodo if r["_delta"] < 0)
-    _neto = _total_ent - _total_sal
-
+    # Métricas de la caja
     _mc1, _mc2, _mc3 = st.columns(3)
-    _mc1.metric("Entradas",     fmt(_total_ent, moneda))
-    _mc2.metric("Salidas",      fmt(_total_sal, moneda))
-    _mc3.metric("Neto período", fmt(_neto,      moneda))
+    _metricas_colores(_mc1, "Saldo actual", saldo_actual, moneda, "#4472C4")
+    _metricas_colores(_mc2, "Entradas",     _tot_ent,    moneda, "#2e7d32")
+    _metricas_colores(_mc3, "Salidas",      _tot_sal,    moneda, "#c62828")
 
-    if _en_periodo:
-        _tabla = [{
-            "Fecha":       _fmt_fecha(r["_f"]),
-            "Tipo":        r["Tipo"],
-            "Concepto":    r["Concepto"],
-            "Descripción": r["Descripción"],
-            "Entrada":     r["_delta"] if r["_delta"] > 0 else 0.0,
-            "Salida":      -r["_delta"] if r["_delta"] < 0 else 0.0,
-            "Saldo":       r["_saldo"],
-        } for r in reversed(_en_periodo)]
-        st.dataframe(pd.DataFrame(_tabla), hide_index=True, use_container_width=True,
-                     column_config={
-                         "Entrada": st.column_config.NumberColumn("Entrada", format=_fmt_n),
-                         "Salida":  st.column_config.NumberColumn("Salida",  format=_fmt_n),
-                         "Saldo":   st.column_config.NumberColumn("Saldo",   format=_fmt_n),
-                     })
-    else:
-        st.caption("Sin movimientos en el período.")
+    # Helpers para armar filas de tabla
+    def _rows_jerarquia(rows, tipo):
+        return sorted([{
+            "Fecha":       _fmt_fecha(r.get("fecha")),
+            "Concepto":    " / ".join(x for x in [_nombre_rubro(r, tipo), _nombre_subrubro(r, tipo), _nombre_item(r, tipo)] if x and x != "—") or "—",
+            "Monto":       float(r.get("monto") or 0),
+            "Descripción": r.get("descripcion") or "",
+        } for r in rows], key=lambda x: x["Fecha"], reverse=True)
+
+    def _rows_trf(rows):
+        return sorted([{
+            "Fecha":           _fmt_fecha(r.get("fecha")),
+            "Origen → Destino": f"{(r.get('origen') or {}).get('nombre','—')} → {(r.get('destino') or {}).get('nombre','—')}",
+            "Monto":           float(r.get("monto") or 0),
+            "Concepto":        r.get("concepto") or "",
+        } for r in rows], key=lambda x: x["Fecha"], reverse=True)
+
+    def _rows_aj(rows):
+        return sorted([{
+            "Fecha": _fmt_fecha(r.get("fecha")),
+            "Nota":  r.get("nota") or "—",
+            "Monto": abs(float(r.get("monto") or 0)),
+        } for r in rows], key=lambda x: x["Fecha"], reverse=True)
+
+    def _grupo(label, rows, build_fn):
+        if not rows:
+            return
+        _tot = sum(float(r.get("monto") or 0) for r in rows)
+        with st.expander(f"{label} ({len(rows)}) — {fmt(_tot, moneda)}"):
+            _df = pd.DataFrame(build_fn(rows))
+            st.dataframe(_df, hide_index=True, use_container_width=True,
+                         column_config={"Monto": st.column_config.NumberColumn("Monto", format=_fmt_n)})
+
+    _grupo("ENTRADAS - INGRESOS",       _ing,   lambda r: _rows_jerarquia(r, "ingreso"))
+    _grupo("ENTRADAS - TRANSFERENCIAS", _trf_e, _rows_trf)
+    _grupo("ENTRADAS - AJUSTES",        _aj_p,  _rows_aj)
+    _grupo("SALIDAS - EGRESOS",         _egr_g, lambda r: _rows_jerarquia(r, "egreso"))
+    _grupo("SALIDAS - INVERSIONES",     _egr_i, lambda r: _rows_jerarquia(r, "egreso"))
+    _grupo("SALIDAS - TRANSFERENCIAS",  _trf_s, _rows_trf)
+    _grupo("SALIDAS - AJUSTES",         _aj_n,  _rows_aj)
 
 
 with tab_movimientos:
@@ -303,10 +280,10 @@ with tab_movimientos:
     _desde_m = c1.date_input("Desde", value=_d1m, format="DD/MM/YYYY", key="m_desde")
     _hasta_m = c2.date_input("Hasta", value=_d2m, format="DD/MM/YYYY", key="m_hasta")
 
-    _ing_m_all  = db.cargar_ingresos()
-    _egr_m_all  = db.cargar_egresos()
-    _trf_m_all  = db.cargar_transferencias()
-    _aj_m_all   = db.cargar_ajustes()
+    _ing_m_all   = db.cargar_ingresos()
+    _egr_m_all   = db.cargar_egresos()
+    _trf_m_all   = db.cargar_transferencias()
+    _aj_m_all    = db.cargar_ajustes()
     _cajas_m_all = db.cargar_cajas()
 
     def _render_mov_moneda(moneda):
@@ -314,11 +291,38 @@ with tab_movimientos:
         if not _cajas_mon:
             st.info("No hay cajas configuradas para esta moneda.")
             return
+
+        _saldos = {c["id"]: _calcular_saldo_caja(c["id"], _aj_m_all, _ing_m_all, _egr_m_all, _trf_m_all)
+                   for c in _cajas_mon}
+
+        # Calcular entradas/salidas del período para el total general
+        _ds, _hs = str(_desde_m), str(_hasta_m)
+        def _en(f): return _ds <= str(f or "") <= _hs
+        _ids_mon = {c["id"] for c in _cajas_mon}
+
+        _tot_ent_g = (sum(float(r.get("monto") or 0) for r in _ing_m_all  if r.get("caja_id") in _ids_mon and _en(r.get("fecha")))
+                    + sum(float(r.get("monto") or 0) for r in _trf_m_all  if r.get("destino_id") in _ids_mon and _en(r.get("fecha")))
+                    + sum(float(r.get("monto") or 0) for r in _aj_m_all   if r.get("caja_id") in _ids_mon and r.get("tipo") == "ajuste" and float(r.get("monto") or 0) > 0 and _en(r.get("fecha"))))
+        _tot_sal_g = (sum(float(r.get("monto") or 0) for r in _egr_m_all  if r.get("caja_id") in _ids_mon and _en(r.get("fecha")))
+                    + sum(float(r.get("monto") or 0) for r in _trf_m_all  if r.get("origen_id")  in _ids_mon and _en(r.get("fecha")))
+                    + sum(-float(r.get("monto") or 0) for r in _aj_m_all  if r.get("caja_id") in _ids_mon and r.get("tipo") == "ajuste" and float(r.get("monto") or 0) < 0 and _en(r.get("fecha"))))
+        _tot_saldo_g = sum(_saldos.values())
+
+        # ── Total general ──────────────────────────────────────────────────────
+        st.markdown("### Total general")
+        _tg1, _tg2, _tg3 = st.columns(3)
+        _metricas_colores(_tg1, "Saldo",    _tot_saldo_g, moneda, "#4472C4")
+        _metricas_colores(_tg2, "Entradas", _tot_ent_g,   moneda, "#2e7d32")
+        _metricas_colores(_tg3, "Salidas",  _tot_sal_g,   moneda, "#c62828")
+        st.divider()
+
+        # ── Por caja ───────────────────────────────────────────────────────────
         for _caja in _cajas_mon:
-            _saldo_act = _calcular_saldo_caja(_caja["id"], _aj_m_all, _ing_m_all, _egr_m_all, _trf_m_all)
-            with st.expander(f"**{_caja['nombre']}** — Saldo actual: {fmt(_saldo_act, moneda)}", expanded=True):
-                _render_movimientos_caja(_caja, _desde_m, _hasta_m,
-                                         _ing_m_all, _egr_m_all, _trf_m_all, _aj_m_all)
+            st.markdown(f"### {_caja['nombre']}")
+            _render_movimientos_caja(_caja, _desde_m, _hasta_m,
+                                     _ing_m_all, _egr_m_all, _trf_m_all, _aj_m_all,
+                                     _saldos[_caja["id"]])
+            st.divider()
 
     _mtab_ars, _mtab_usd = st.tabs(["🇦🇷 Pesos (ARS)", "🇺🇸 Dólares (USD)"])
     with _mtab_ars:
