@@ -20,13 +20,13 @@ def cargar_cajas():
     return _exec(get_client().table("cajas").select("*").order("nombre")).data or []
 
 
-def guardar_caja(nombre):
-    get_client().table("cajas").insert({"nombre": nombre.strip(), "activa": True}).execute()
+def guardar_caja(nombre, moneda="ARS"):
+    get_client().table("cajas").insert({"nombre": nombre.strip(), "activa": True, "moneda": moneda}).execute()
     cargar_cajas.clear()
 
 
-def actualizar_caja(id, nombre, activa):
-    get_client().table("cajas").update({"nombre": nombre.strip(), "activa": activa}).eq("id", id).execute()
+def actualizar_caja(id, nombre, activa, moneda="ARS"):
+    get_client().table("cajas").update({"nombre": nombre.strip(), "activa": activa, "moneda": moneda}).eq("id", id).execute()
     cargar_cajas.clear()
 
 

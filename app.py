@@ -8,8 +8,36 @@ st.title("💰 Flujo personal")
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
-def fmt(v):
-    return f"$ {float(v or 0):,.0f}"
+def fmt(v, moneda="ARS"):
+    sym = "USD" if moneda == "USD" else "$"
+    return f"{sym} {float(v or 0):,.0f}"
+
+
+def _calcular_saldo_caja(caja_id, ajustes, ingresos, egresos, transferencias):
+    """Saldo actual = saldo_inicial + ingresos - egresos ± transferencias ± ajustes libres."""
+    saldo = 0.0
+    fecha_ini = None
+    for a in ajustes:
+        if a["caja_id"] == caja_id and a["tipo"] == "inicial":
+            saldo = float(a["monto"])
+            fecha_ini = a["fecha"]
+            break
+    for r in ingresos:
+        if r.get("caja_id") == caja_id and (not fecha_ini or r["fecha"] >= fecha_ini):
+            saldo += float(r["monto"])
+    for r in egresos:
+        if r.get("caja_id") == caja_id and (not fecha_ini or r["fecha"] >= fecha_ini):
+            saldo -= float(r["monto"])
+    for r in transferencias:
+        if not fecha_ini or r["fecha"] >= fecha_ini:
+            if r.get("destino_id") == caja_id:
+                saldo += float(r["monto"])
+            if r.get("origen_id") == caja_id:
+                saldo -= float(r["monto"])
+    for a in ajustes:
+        if a["caja_id"] == caja_id and a["tipo"] == "ajuste" and (not fecha_ini or a["fecha"] >= fecha_ini):
+            saldo += float(a["monto"])
+    return saldo
 
 
 def _mes_actual():
@@ -61,61 +89,69 @@ with tab_percibido:
     _desde = c1.date_input("Desde", value=_d1, format="DD/MM/YYYY", key="p_desde")
     _hasta = c2.date_input("Hasta", value=_d2, format="DD/MM/YYYY", key="p_hasta")
 
-    _ing  = db.cargar_ingresos(_desde, _hasta)
-    _egr  = db.cargar_egresos(_desde, _hasta)
+    _ing_all  = db.cargar_ingresos(_desde, _hasta)
+    _egr_all  = db.cargar_egresos(_desde, _hasta)
+    _trf_all  = db.cargar_transferencias()
+    _aj_all   = db.cargar_ajustes()
+    _cajas_all = db.cargar_cajas()
+    _cajas_mon = {c["id"]: c.get("moneda", "ARS") for c in _cajas_all}
 
-    # Totales por rubro — ingresos
-    _ing_rows = []
-    for r in _ing:
-        _ing_rows.append({
-            "Rubro": _nombre_rubro(r, "ingreso"),
-            "Subrubro": _nombre_subrubro(r, "ingreso"),
-            "Monto": float(r.get("monto") or 0),
-        })
+    def _render_percibido(moneda):
+        _cajas_m = [c for c in _cajas_all if c.get("moneda", "ARS") == moneda]
+        _ids_m   = {c["id"] for c in _cajas_m}
 
-    # Totales por rubro — egresos
-    _egr_rows = []
-    for r in _egr:
-        _egr_rows.append({
-            "Rubro": _nombre_rubro(r, "egreso"),
-            "Subrubro": _nombre_subrubro(r, "egreso"),
-            "Monto": float(r.get("monto") or 0),
-        })
+        _ing  = [r for r in _ing_all  if r.get("caja_id") in _ids_m]
+        _egr  = [r for r in _egr_all  if r.get("caja_id") in _ids_m]
 
-    _total_ing = sum(r["Monto"] for r in _ing_rows)
-    _total_egr = sum(r["Monto"] for r in _egr_rows)
-    _neto      = _total_ing - _total_egr
+        # Saldos actuales
+        _ing_todo = db.cargar_ingresos()
+        _egr_todo = db.cargar_egresos()
+        st.markdown("**Saldo actual por caja**")
+        _saldo_cols = st.columns(max(len(_cajas_m), 1))
+        for i, c in enumerate(_cajas_m):
+            _s = _calcular_saldo_caja(c["id"], _aj_all, _ing_todo, _egr_todo, _trf_all)
+            _saldo_cols[i].metric(c["nombre"], fmt(_s, moneda))
 
-    col_i, col_e, col_n = st.columns(3)
-    col_i.metric("Total ingresos",  fmt(_total_ing))
-    col_e.metric("Total egresos",   fmt(_total_egr))
-    col_n.metric("Neto",            fmt(_neto), delta=fmt(_neto))
+        st.divider()
 
-    st.divider()
+        _ing_rows = [{"Rubro": _nombre_rubro(r, "ingreso"), "Monto": float(r.get("monto") or 0)} for r in _ing]
+        _egr_rows = [{"Rubro": _nombre_rubro(r, "egreso"),  "Monto": float(r.get("monto") or 0)} for r in _egr]
 
-    ci, ce = st.columns(2)
+        _total_ing = sum(r["Monto"] for r in _ing_rows)
+        _total_egr = sum(r["Monto"] for r in _egr_rows)
+        _neto      = _total_ing - _total_egr
 
-    with ci:
-        st.markdown("**Ingresos por rubro**")
-        if _ing_rows:
-            _df_i = (pd.DataFrame(_ing_rows)
-                       .groupby("Rubro", as_index=False)["Monto"].sum()
-                       .sort_values("Monto", ascending=False))
-            _df_i["Monto"] = _df_i["Monto"].apply(fmt)
-            st.dataframe(_df_i, hide_index=True, use_container_width=True)
-        else:
-            st.info("Sin ingresos en el período.")
+        col_i, col_e, col_n = st.columns(3)
+        col_i.metric("Ingresos del período", fmt(_total_ing, moneda))
+        col_e.metric("Egresos del período",  fmt(_total_egr, moneda))
+        col_n.metric("Neto",                 fmt(_neto, moneda))
 
-    with ce:
-        st.markdown("**Egresos por rubro**")
-        if _egr_rows:
-            _df_e = (pd.DataFrame(_egr_rows)
-                       .groupby("Rubro", as_index=False)["Monto"].sum()
-                       .sort_values("Monto", ascending=False))
-            _df_e["Monto"] = _df_e["Monto"].apply(fmt)
-            st.dataframe(_df_e, hide_index=True, use_container_width=True)
-        else:
-            st.info("Sin egresos en el período.")
+        st.divider()
+        ci, ce = st.columns(2)
+        with ci:
+            st.markdown("**Ingresos por rubro**")
+            if _ing_rows:
+                _df_i = (pd.DataFrame(_ing_rows).groupby("Rubro", as_index=False)["Monto"].sum()
+                           .sort_values("Monto", ascending=False))
+                _df_i["Monto"] = _df_i["Monto"].apply(lambda v: fmt(v, moneda))
+                st.dataframe(_df_i, hide_index=True, use_container_width=True)
+            else:
+                st.info("Sin ingresos en el período.")
+        with ce:
+            st.markdown("**Egresos por rubro**")
+            if _egr_rows:
+                _df_e = (pd.DataFrame(_egr_rows).groupby("Rubro", as_index=False)["Monto"].sum()
+                           .sort_values("Monto", ascending=False))
+                _df_e["Monto"] = _df_e["Monto"].apply(lambda v: fmt(v, moneda))
+                st.dataframe(_df_e, hide_index=True, use_container_width=True)
+            else:
+                st.info("Sin egresos en el período.")
+
+    _ptab_ars, _ptab_usd = st.tabs(["🇦🇷 Pesos (ARS)", "🇺🇸 Dólares (USD)"])
+    with _ptab_ars:
+        _render_percibido("ARS")
+    with _ptab_usd:
+        _render_percibido("USD")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -130,56 +166,47 @@ with tab_movimientos:
     _desde_m = c1.date_input("Desde", value=_d1m, format="DD/MM/YYYY", key="m_desde")
     _hasta_m = c2.date_input("Hasta", value=_d2m, format="DD/MM/YYYY", key="m_hasta")
 
-    _ing_m  = db.cargar_ingresos(_desde_m, _hasta_m)
-    _egr_m  = db.cargar_egresos(_desde_m, _hasta_m)
-    _trf_m  = db.cargar_transferencias(_desde_m, _hasta_m)
+    _ing_m_all  = db.cargar_ingresos(_desde_m, _hasta_m)
+    _egr_m_all  = db.cargar_egresos(_desde_m, _hasta_m)
+    _trf_m_all  = db.cargar_transferencias(_desde_m, _hasta_m)
+    _cajas_m_all = db.cargar_cajas()
+    _cajas_m_mon = {c["id"]: c.get("moneda", "ARS") for c in _cajas_m_all}
 
-    _rows_m = []
-    for r in _ing_m:
-        _rows_m.append({
-            "Fecha": r["fecha"],
-            "Tipo": "Ingreso",
-            "Rubro": _nombre_rubro(r, "ingreso"),
-            "Subrubro": _nombre_subrubro(r, "ingreso"),
-            "Item": _nombre_item(r, "ingreso"),
-            "Caja": _nombre_caja(r),
-            "Descripción": r.get("descripcion") or "",
-            "Monto": float(r.get("monto") or 0),
-        })
-    for r in _egr_m:
-        _rows_m.append({
-            "Fecha": r["fecha"],
-            "Tipo": "Egreso",
-            "Rubro": _nombre_rubro(r, "egreso"),
-            "Subrubro": _nombre_subrubro(r, "egreso"),
-            "Item": _nombre_item(r, "egreso"),
-            "Caja": _nombre_caja(r),
-            "Descripción": r.get("descripcion") or "",
-            "Monto": -float(r.get("monto") or 0),
-        })
-    for r in _trf_m:
-        _orig = (r.get("origen") or {}).get("nombre") or "—"
-        _dest = (r.get("destino") or {}).get("nombre") or "—"
-        _rows_m.append({
-            "Fecha": r["fecha"],
-            "Tipo": "Transferencia",
-            "Rubro": f"{_orig} → {_dest}",
-            "Subrubro": "",
-            "Item": "",
-            "Caja": f"{_orig} → {_dest}",
-            "Descripción": r.get("concepto") or "",
-            "Monto": 0.0,
-        })
+    def _render_movimientos(moneda):
+        _ids_mon = {c["id"] for c in _cajas_m_all if c.get("moneda", "ARS") == moneda}
+        _rows_m = []
+        for r in _ing_m_all:
+            if r.get("caja_id") in _ids_mon:
+                _rows_m.append({"Fecha": r["fecha"], "Tipo": "Ingreso",
+                    "Rubro": _nombre_rubro(r, "ingreso"), "Subrubro": _nombre_subrubro(r, "ingreso"),
+                    "Item": _nombre_item(r, "ingreso"), "Caja": _nombre_caja(r),
+                    "Descripción": r.get("descripcion") or "", "Monto": float(r.get("monto") or 0)})
+        for r in _egr_m_all:
+            if r.get("caja_id") in _ids_mon:
+                _rows_m.append({"Fecha": r["fecha"], "Tipo": "Egreso",
+                    "Rubro": _nombre_rubro(r, "egreso"), "Subrubro": _nombre_subrubro(r, "egreso"),
+                    "Item": _nombre_item(r, "egreso"), "Caja": _nombre_caja(r),
+                    "Descripción": r.get("descripcion") or "", "Monto": -float(r.get("monto") or 0)})
+        for r in _trf_m_all:
+            if r.get("origen_id") in _ids_mon or r.get("destino_id") in _ids_mon:
+                _orig = (r.get("origen") or {}).get("nombre") or "—"
+                _dest = (r.get("destino") or {}).get("nombre") or "—"
+                _rows_m.append({"Fecha": r["fecha"], "Tipo": "Transferencia",
+                    "Rubro": f"{_orig} → {_dest}", "Subrubro": "", "Item": "",
+                    "Caja": f"{_orig} → {_dest}", "Descripción": r.get("concepto") or "", "Monto": 0.0})
+        if _rows_m:
+            _df_m = pd.DataFrame(_rows_m).sort_values("Fecha", ascending=False)
+            _df_m["Monto"] = _df_m["Monto"].apply(lambda v: fmt(v, moneda))
+            st.dataframe(_df_m[["Fecha", "Tipo", "Rubro", "Subrubro", "Item", "Caja", "Descripción", "Monto"]],
+                hide_index=True, use_container_width=True)
+        else:
+            st.info("Sin movimientos en el período.")
 
-    if _rows_m:
-        _df_m = pd.DataFrame(_rows_m).sort_values("Fecha", ascending=False)
-        _df_m["Monto_fmt"] = _df_m["Monto"].apply(fmt)
-        st.dataframe(
-            _df_m[["Fecha", "Tipo", "Rubro", "Subrubro", "Item", "Caja", "Descripción", "Monto_fmt"]].rename(columns={"Monto_fmt": "Monto"}),
-            hide_index=True, use_container_width=True,
-        )
-    else:
-        st.info("Sin movimientos en el período.")
+    _mtab_ars, _mtab_usd = st.tabs(["🇦🇷 Pesos (ARS)", "🇺🇸 Dólares (USD)"])
+    with _mtab_ars:
+        _render_movimientos("ARS")
+    with _mtab_usd:
+        _render_movimientos("USD")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -551,13 +578,17 @@ with tab_config:
         st.markdown("**Cajas activas**")
         _cajas_cfg = db.cargar_cajas()
         for _c in _cajas_cfg:
-            with st.expander(f"{'✅' if _c['activa'] else '❌'} {_c['nombre']}"):
+            _mon_icon = "🇦🇷" if _c.get("moneda", "ARS") == "ARS" else "🇺🇸"
+            with st.expander(f"{'✅' if _c['activa'] else '❌'} {_mon_icon} {_c['nombre']}"):
                 with st.form(f"edit_caja_{_c['id']}"):
                     _cn = st.text_input("Nombre", value=_c["nombre"])
-                    _ca = st.checkbox("Activa", value=_c["activa"])
+                    cc1, cc2 = st.columns(2)
+                    _ca = cc1.checkbox("Activa", value=_c["activa"])
+                    _cm_opts = ["ARS", "USD"]
+                    _cm = cc2.selectbox("Moneda", _cm_opts, index=_cm_opts.index(_c.get("moneda", "ARS")))
                     bc1, bc2 = st.columns(2)
                     if bc1.form_submit_button("💾 Guardar"):
-                        db.actualizar_caja(_c["id"], _cn, _ca)
+                        db.actualizar_caja(_c["id"], _cn, _ca, _cm)
                         st.rerun()
                     if bc2.form_submit_button("🗑️ Eliminar", type="secondary"):
                         db.eliminar_caja(_c["id"])
@@ -565,9 +596,10 @@ with tab_config:
 
         with st.form("form_nueva_caja"):
             _nc = st.text_input("Nueva caja")
+            _nc_mon = st.selectbox("Moneda", ["ARS", "USD"])
             if st.form_submit_button("➕ Agregar", type="primary"):
                 if _nc.strip():
-                    db.guardar_caja(_nc)
+                    db.guardar_caja(_nc, _nc_mon)
                     st.rerun()
 
     # ── Rubros ingresos ────────────────────────────────────────────────────────
