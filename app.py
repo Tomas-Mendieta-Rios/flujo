@@ -217,41 +217,38 @@ with tab_ingresos:
     st.subheader("Ingresos")
 
     with st.expander("➕ Nuevo ingreso", expanded=False):
-        with st.form("form_nuevo_ingreso"):
-            ci1, ci2 = st.columns(2)
-            _fi = ci1.date_input("Fecha", value=date.today(), format="DD/MM/YYYY")
-            _mi = ci2.number_input("Monto", min_value=0.0, step=100.0, format="%.2f")
+        ci1, ci2 = st.columns(2)
+        _fi = ci1.date_input("Fecha", value=date.today(), format="DD/MM/YYYY", key="ni_fecha")
+        _mi = ci2.number_input("Monto", min_value=0.0, step=100.0, format="%.2f", key="ni_monto")
 
-            _rubros_i = db.cargar_rubros_ingresos()
-            _rmap_i   = {r["nombre"]: r["id"] for r in _rubros_i}
-            _ri_sel   = st.selectbox("Rubro", ["— sin rubro —"] + list(_rmap_i.keys()), key="ni_rubro")
-            _ri_id    = _rmap_i.get(_ri_sel)
+        _rubros_i = db.cargar_rubros_ingresos()
+        _rmap_i   = {r["nombre"]: r["id"] for r in _rubros_i}
+        _ri_sel   = st.selectbox("Rubro", ["— sin rubro —"] + list(_rmap_i.keys()), key="ni_rubro")
+        _ri_id    = _rmap_i.get(_ri_sel)
 
-            _sub_i_opts = db.cargar_subrubros_ingresos(_ri_id) if _ri_id else []
-            _smap_i     = {s["nombre"]: s["id"] for s in _sub_i_opts}
-            _si_sel     = st.selectbox("Subrubro", ["— sin subrubro —"] + list(_smap_i.keys()), key="ni_sub")
-            _si_id      = _smap_i.get(_si_sel)
+        _sub_i_opts = db.cargar_subrubros_ingresos(_ri_id) if _ri_id else []
+        _smap_i     = {s["nombre"]: s["id"] for s in _sub_i_opts}
+        _si_sel     = st.selectbox("Subrubro", ["— sin subrubro —"] + list(_smap_i.keys()), key="ni_sub")
+        _si_id      = _smap_i.get(_si_sel)
 
-            _item_i_opts = db.cargar_items_ingresos(_si_id) if _si_id else []
-            _imap_i      = {it["nombre"]: it["id"] for it in _item_i_opts}
-            _ii_sel      = st.selectbox("Ítem", ["— sin ítem —"] + list(_imap_i.keys()), key="ni_item")
-            _ii_id       = _imap_i.get(_ii_sel)
+        _item_i_opts = db.cargar_items_ingresos(_si_id) if _si_id else []
+        _imap_i      = {it["nombre"]: it["id"] for it in _item_i_opts}
+        _ii_sel      = st.selectbox("Ítem", ["— sin ítem —"] + list(_imap_i.keys()), key="ni_item")
+        _ii_id       = _imap_i.get(_ii_sel)
 
-            _cajas_i = db.cargar_cajas()
-            _cmap_i  = {c["nombre"]: c["id"] for c in _cajas_i}
-            _ci_sel  = st.selectbox("Caja", ["— sin caja —"] + list(_cmap_i.keys()), key="ni_caja")
-            _ci_id   = _cmap_i.get(_ci_sel)
+        _cajas_i = db.cargar_cajas()
+        _cmap_i  = {c["nombre"]: c["id"] for c in _cajas_i}
+        _ci_sel  = st.selectbox("Caja", ["— sin caja —"] + list(_cmap_i.keys()), key="ni_caja")
+        _ci_id   = _cmap_i.get(_ci_sel)
 
-            _desc_i = st.text_input("Descripción (opcional)")
-            _btn_ni = st.form_submit_button("Guardar", type="primary")
-
-            if _btn_ni:
-                if _mi <= 0:
-                    st.error("El monto debe ser mayor a 0.")
-                else:
-                    db.guardar_ingreso(_fi, _ri_id, _si_id, _ii_id, _ci_id, _mi, _desc_i)
-                    st.success("✅ Ingreso guardado.")
-                    st.rerun()
+        _desc_i = st.text_input("Descripción (opcional)", key="ni_desc")
+        if st.button("💾 Guardar ingreso", type="primary", key="ni_save"):
+            if _mi <= 0:
+                st.error("El monto debe ser mayor a 0.")
+            else:
+                db.guardar_ingreso(_fi, _ri_id, _si_id, _ii_id, _ci_id, _mi, _desc_i)
+                st.success("✅ Ingreso guardado.")
+                st.rerun()
 
     # Listado
     _d1i, _d2i = _mes_actual()
@@ -269,48 +266,49 @@ with tab_ingresos:
                 ce2.write(f"**Caja:** {_nombre_caja(_row)}")
                 ce2.write(f"**Descripción:** {_row.get('descripcion') or '—'}")
 
-                with st.form(f"edit_ing_{_row['id']}"):
-                    ec1, ec2 = st.columns(2)
-                    _ef = ec1.date_input("Fecha", value=date.fromisoformat(_row["fecha"]), format="DD/MM/YYYY")
-                    _em = ec2.number_input("Monto", value=float(_row["monto"]), step=100.0, format="%.2f")
+                _rid = _row["id"]
+                ec1, ec2 = st.columns(2)
+                _ef = ec1.date_input("Fecha", value=date.fromisoformat(_row["fecha"]), format="DD/MM/YYYY", key=f"ei_{_rid}_f")
+                _em = ec2.number_input("Monto", value=float(_row["monto"]), step=100.0, format="%.2f", key=f"ei_{_rid}_m")
 
-                    _rubros_e = db.cargar_rubros_ingresos()
-                    _rmap_e   = {r["nombre"]: r["id"] for r in _rubros_e}
-                    _er_actual = (_nombre_rubro(_row, "ingreso") if _nombre_rubro(_row, "ingreso") != "—" else "— sin rubro —")
-                    _er_sel   = st.selectbox("Rubro", ["— sin rubro —"] + list(_rmap_e.keys()), index=(["— sin rubro —"] + list(_rmap_e.keys())).index(_er_actual) if _er_actual in (["— sin rubro —"] + list(_rmap_e.keys())) else 0)
-                    _er_id    = _rmap_e.get(_er_sel)
+                _rubros_e = db.cargar_rubros_ingresos()
+                _rmap_e   = {r["nombre"]: r["id"] for r in _rubros_e}
+                _er_opts  = ["— sin rubro —"] + list(_rmap_e.keys())
+                _er_actual = _nombre_rubro(_row, "ingreso") if _nombre_rubro(_row, "ingreso") != "—" else "— sin rubro —"
+                _er_sel   = st.selectbox("Rubro", _er_opts, index=_er_opts.index(_er_actual) if _er_actual in _er_opts else 0, key=f"ei_{_rid}_r")
+                _er_id    = _rmap_e.get(_er_sel)
 
-                    _sub_e_opts = db.cargar_subrubros_ingresos(_er_id) if _er_id else []
-                    _smap_e     = {s["nombre"]: s["id"] for s in _sub_e_opts}
-                    _es_actual  = (_nombre_subrubro(_row, "ingreso") if _nombre_subrubro(_row, "ingreso") != "—" else "— sin subrubro —")
-                    _es_sel     = st.selectbox("Subrubro", ["— sin subrubro —"] + list(_smap_e.keys()), index=(["— sin subrubro —"] + list(_smap_e.keys())).index(_es_actual) if _es_actual in (["— sin subrubro —"] + list(_smap_e.keys())) else 0)
-                    _es_id      = _smap_e.get(_es_sel)
+                _sub_e_opts = db.cargar_subrubros_ingresos(_er_id) if _er_id else []
+                _smap_e     = {s["nombre"]: s["id"] for s in _sub_e_opts}
+                _es_opts    = ["— sin subrubro —"] + list(_smap_e.keys())
+                _es_actual  = _nombre_subrubro(_row, "ingreso") if _nombre_subrubro(_row, "ingreso") != "—" else "— sin subrubro —"
+                _es_sel     = st.selectbox("Subrubro", _es_opts, index=_es_opts.index(_es_actual) if _es_actual in _es_opts else 0, key=f"ei_{_rid}_s")
+                _es_id      = _smap_e.get(_es_sel)
 
-                    _item_e_opts = db.cargar_items_ingresos(_es_id) if _es_id else []
-                    _imap_e      = {it["nombre"]: it["id"] for it in _item_e_opts}
-                    _ei_actual   = (_nombre_item(_row, "ingreso") if _nombre_item(_row, "ingreso") != "—" else "— sin ítem —")
-                    _ei_sel      = st.selectbox("Ítem", ["— sin ítem —"] + list(_imap_e.keys()), index=(["— sin ítem —"] + list(_imap_e.keys())).index(_ei_actual) if _ei_actual in (["— sin ítem —"] + list(_imap_e.keys())) else 0)
-                    _ei_id       = _imap_e.get(_ei_sel)
+                _item_e_opts = db.cargar_items_ingresos(_es_id) if _es_id else []
+                _imap_e      = {it["nombre"]: it["id"] for it in _item_e_opts}
+                _ei_opts     = ["— sin ítem —"] + list(_imap_e.keys())
+                _ei_actual   = _nombre_item(_row, "ingreso") if _nombre_item(_row, "ingreso") != "—" else "— sin ítem —"
+                _ei_sel      = st.selectbox("Ítem", _ei_opts, index=_ei_opts.index(_ei_actual) if _ei_actual in _ei_opts else 0, key=f"ei_{_rid}_i")
+                _ei_id       = _imap_e.get(_ei_sel)
 
-                    _cajas_e = db.cargar_cajas()
-                    _cmap_e  = {c["nombre"]: c["id"] for c in _cajas_e}
-                    _ec_actual = (_nombre_caja(_row) if _nombre_caja(_row) != "—" else "— sin caja —")
-                    _ec_sel   = st.selectbox("Caja", ["— sin caja —"] + list(_cmap_e.keys()), index=(["— sin caja —"] + list(_cmap_e.keys())).index(_ec_actual) if _ec_actual in (["— sin caja —"] + list(_cmap_e.keys())) else 0)
-                    _ec_id    = _cmap_e.get(_ec_sel)
+                _cajas_e = db.cargar_cajas()
+                _cmap_e  = {c["nombre"]: c["id"] for c in _cajas_e}
+                _ec_opts = ["— sin caja —"] + list(_cmap_e.keys())
+                _ec_actual = _nombre_caja(_row) if _nombre_caja(_row) != "—" else "— sin caja —"
+                _ec_sel   = st.selectbox("Caja", _ec_opts, index=_ec_opts.index(_ec_actual) if _ec_actual in _ec_opts else 0, key=f"ei_{_rid}_c")
+                _ec_id    = _cmap_e.get(_ec_sel)
 
-                    _ed = st.text_input("Descripción", value=_row.get("descripcion") or "")
+                _ed = st.text_input("Descripción", value=_row.get("descripcion") or "", key=f"ei_{_rid}_d")
 
-                    bc1, bc2 = st.columns(2)
-                    _btn_upd = bc1.form_submit_button("💾 Guardar")
-                    _btn_del = bc2.form_submit_button("🗑️ Eliminar", type="secondary")
-
-                    if _btn_upd:
-                        db.actualizar_ingreso(_row["id"], _ef, _er_id, _es_id, _ei_id, _ec_id, _em, _ed)
-                        st.success("✅ Actualizado.")
-                        st.rerun()
-                    if _btn_del:
-                        db.eliminar_ingreso(_row["id"])
-                        st.rerun()
+                bc1, bc2 = st.columns(2)
+                if bc1.button("💾 Guardar", key=f"ei_{_rid}_upd"):
+                    db.actualizar_ingreso(_row["id"], _ef, _er_id, _es_id, _ei_id, _ec_id, _em, _ed)
+                    st.success("✅ Actualizado.")
+                    st.rerun()
+                if bc2.button("🗑️ Eliminar", key=f"ei_{_rid}_del"):
+                    db.eliminar_ingreso(_row["id"])
+                    st.rerun()
     else:
         st.info("Sin ingresos en el período.")
 
@@ -323,41 +321,38 @@ with tab_egresos:
     st.subheader("Egresos")
 
     with st.expander("➕ Nuevo egreso", expanded=False):
-        with st.form("form_nuevo_egreso"):
-            ce1, ce2 = st.columns(2)
-            _fe = ce1.date_input("Fecha", value=date.today(), format="DD/MM/YYYY")
-            _me = ce2.number_input("Monto", min_value=0.0, step=100.0, format="%.2f")
+        ce1, ce2 = st.columns(2)
+        _fe = ce1.date_input("Fecha", value=date.today(), format="DD/MM/YYYY", key="ne_fecha")
+        _me = ce2.number_input("Monto", min_value=0.0, step=100.0, format="%.2f", key="ne_monto")
 
-            _rubros_eg = db.cargar_rubros_egresos()
-            _rmap_eg   = {r["nombre"]: r["id"] for r in _rubros_eg}
-            _re_sel    = st.selectbox("Rubro", ["— sin rubro —"] + list(_rmap_eg.keys()), key="ne_rubro")
-            _re_id     = _rmap_eg.get(_re_sel)
+        _rubros_eg = db.cargar_rubros_egresos()
+        _rmap_eg   = {r["nombre"]: r["id"] for r in _rubros_eg}
+        _re_sel    = st.selectbox("Rubro", ["— sin rubro —"] + list(_rmap_eg.keys()), key="ne_rubro")
+        _re_id     = _rmap_eg.get(_re_sel)
 
-            _sub_eg_opts = db.cargar_subrubros_egresos(_re_id) if _re_id else []
-            _smap_eg     = {s["nombre"]: s["id"] for s in _sub_eg_opts}
-            _se_sel      = st.selectbox("Subrubro", ["— sin subrubro —"] + list(_smap_eg.keys()), key="ne_sub")
-            _se_id       = _smap_eg.get(_se_sel)
+        _sub_eg_opts = db.cargar_subrubros_egresos(_re_id) if _re_id else []
+        _smap_eg     = {s["nombre"]: s["id"] for s in _sub_eg_opts}
+        _se_sel      = st.selectbox("Subrubro", ["— sin subrubro —"] + list(_smap_eg.keys()), key="ne_sub")
+        _se_id       = _smap_eg.get(_se_sel)
 
-            _item_eg_opts = db.cargar_items_egresos(_se_id) if _se_id else []
-            _imap_eg      = {it["nombre"]: it["id"] for it in _item_eg_opts}
-            _ie_sel       = st.selectbox("Ítem", ["— sin ítem —"] + list(_imap_eg.keys()), key="ne_item")
-            _ie_id        = _imap_eg.get(_ie_sel)
+        _item_eg_opts = db.cargar_items_egresos(_se_id) if _se_id else []
+        _imap_eg      = {it["nombre"]: it["id"] for it in _item_eg_opts}
+        _ie_sel       = st.selectbox("Ítem", ["— sin ítem —"] + list(_imap_eg.keys()), key="ne_item")
+        _ie_id        = _imap_eg.get(_ie_sel)
 
-            _cajas_eg = db.cargar_cajas()
-            _cmap_eg  = {c["nombre"]: c["id"] for c in _cajas_eg}
-            _ce_sel   = st.selectbox("Caja", ["— sin caja —"] + list(_cmap_eg.keys()), key="ne_caja")
-            _ce_id    = _cmap_eg.get(_ce_sel)
+        _cajas_eg = db.cargar_cajas()
+        _cmap_eg  = {c["nombre"]: c["id"] for c in _cajas_eg}
+        _ce_sel   = st.selectbox("Caja", ["— sin caja —"] + list(_cmap_eg.keys()), key="ne_caja")
+        _ce_id    = _cmap_eg.get(_ce_sel)
 
-            _desc_e = st.text_input("Descripción (opcional)")
-            _btn_ne = st.form_submit_button("Guardar", type="primary")
-
-            if _btn_ne:
-                if _me <= 0:
-                    st.error("El monto debe ser mayor a 0.")
-                else:
-                    db.guardar_egreso(_fe, _re_id, _se_id, _ie_id, _ce_id, _me, _desc_e)
-                    st.success("✅ Egreso guardado.")
-                    st.rerun()
+        _desc_e = st.text_input("Descripción (opcional)", key="ne_desc")
+        if st.button("💾 Guardar egreso", type="primary", key="ne_save"):
+            if _me <= 0:
+                st.error("El monto debe ser mayor a 0.")
+            else:
+                db.guardar_egreso(_fe, _re_id, _se_id, _ie_id, _ce_id, _me, _desc_e)
+                st.success("✅ Egreso guardado.")
+                st.rerun()
 
     # Listado
     _d1e, _d2e = _mes_actual()
@@ -375,48 +370,49 @@ with tab_egresos:
                 ce2.write(f"**Caja:** {_nombre_caja(_row)}")
                 ce2.write(f"**Descripción:** {_row.get('descripcion') or '—'}")
 
-                with st.form(f"edit_egr_{_row['id']}"):
-                    ec1, ec2 = st.columns(2)
-                    _ef2 = ec1.date_input("Fecha", value=date.fromisoformat(_row["fecha"]), format="DD/MM/YYYY")
-                    _em2 = ec2.number_input("Monto", value=float(_row["monto"]), step=100.0, format="%.2f")
+                _eid = _row["id"]
+                ec1, ec2 = st.columns(2)
+                _ef2 = ec1.date_input("Fecha", value=date.fromisoformat(_row["fecha"]), format="DD/MM/YYYY", key=f"ee_{_eid}_f")
+                _em2 = ec2.number_input("Monto", value=float(_row["monto"]), step=100.0, format="%.2f", key=f"ee_{_eid}_m")
 
-                    _rubros_ee = db.cargar_rubros_egresos()
-                    _rmap_ee   = {r["nombre"]: r["id"] for r in _rubros_ee}
-                    _er2_actual = (_nombre_rubro(_row, "egreso") if _nombre_rubro(_row, "egreso") != "—" else "— sin rubro —")
-                    _er2_sel   = st.selectbox("Rubro", ["— sin rubro —"] + list(_rmap_ee.keys()), index=(["— sin rubro —"] + list(_rmap_ee.keys())).index(_er2_actual) if _er2_actual in (["— sin rubro —"] + list(_rmap_ee.keys())) else 0)
-                    _er2_id    = _rmap_ee.get(_er2_sel)
+                _rubros_ee = db.cargar_rubros_egresos()
+                _rmap_ee   = {r["nombre"]: r["id"] for r in _rubros_ee}
+                _er2_opts  = ["— sin rubro —"] + list(_rmap_ee.keys())
+                _er2_actual = _nombre_rubro(_row, "egreso") if _nombre_rubro(_row, "egreso") != "—" else "— sin rubro —"
+                _er2_sel   = st.selectbox("Rubro", _er2_opts, index=_er2_opts.index(_er2_actual) if _er2_actual in _er2_opts else 0, key=f"ee_{_eid}_r")
+                _er2_id    = _rmap_ee.get(_er2_sel)
 
-                    _sub_ee_opts = db.cargar_subrubros_egresos(_er2_id) if _er2_id else []
-                    _smap_ee     = {s["nombre"]: s["id"] for s in _sub_ee_opts}
-                    _es2_actual  = (_nombre_subrubro(_row, "egreso") if _nombre_subrubro(_row, "egreso") != "—" else "— sin subrubro —")
-                    _es2_sel     = st.selectbox("Subrubro", ["— sin subrubro —"] + list(_smap_ee.keys()), index=(["— sin subrubro —"] + list(_smap_ee.keys())).index(_es2_actual) if _es2_actual in (["— sin subrubro —"] + list(_smap_ee.keys())) else 0)
-                    _es2_id      = _smap_ee.get(_es2_sel)
+                _sub_ee_opts = db.cargar_subrubros_egresos(_er2_id) if _er2_id else []
+                _smap_ee     = {s["nombre"]: s["id"] for s in _sub_ee_opts}
+                _es2_opts    = ["— sin subrubro —"] + list(_smap_ee.keys())
+                _es2_actual  = _nombre_subrubro(_row, "egreso") if _nombre_subrubro(_row, "egreso") != "—" else "— sin subrubro —"
+                _es2_sel     = st.selectbox("Subrubro", _es2_opts, index=_es2_opts.index(_es2_actual) if _es2_actual in _es2_opts else 0, key=f"ee_{_eid}_s")
+                _es2_id      = _smap_ee.get(_es2_sel)
 
-                    _item_ee_opts = db.cargar_items_egresos(_es2_id) if _es2_id else []
-                    _imap_ee      = {it["nombre"]: it["id"] for it in _item_ee_opts}
-                    _ei2_actual   = (_nombre_item(_row, "egreso") if _nombre_item(_row, "egreso") != "—" else "— sin ítem —")
-                    _ei2_sel      = st.selectbox("Ítem", ["— sin ítem —"] + list(_imap_ee.keys()), index=(["— sin ítem —"] + list(_imap_ee.keys())).index(_ei2_actual) if _ei2_actual in (["— sin ítem —"] + list(_imap_ee.keys())) else 0)
-                    _ei2_id       = _imap_ee.get(_ei2_sel)
+                _item_ee_opts = db.cargar_items_egresos(_es2_id) if _es2_id else []
+                _imap_ee      = {it["nombre"]: it["id"] for it in _item_ee_opts}
+                _ei2_opts     = ["— sin ítem —"] + list(_imap_ee.keys())
+                _ei2_actual   = _nombre_item(_row, "egreso") if _nombre_item(_row, "egreso") != "—" else "— sin ítem —"
+                _ei2_sel      = st.selectbox("Ítem", _ei2_opts, index=_ei2_opts.index(_ei2_actual) if _ei2_actual in _ei2_opts else 0, key=f"ee_{_eid}_i")
+                _ei2_id       = _imap_ee.get(_ei2_sel)
 
-                    _cajas_ee = db.cargar_cajas()
-                    _cmap_ee  = {c["nombre"]: c["id"] for c in _cajas_ee}
-                    _ec2_actual = (_nombre_caja(_row) if _nombre_caja(_row) != "—" else "— sin caja —")
-                    _ec2_sel   = st.selectbox("Caja", ["— sin caja —"] + list(_cmap_ee.keys()), index=(["— sin caja —"] + list(_cmap_ee.keys())).index(_ec2_actual) if _ec2_actual in (["— sin caja —"] + list(_cmap_ee.keys())) else 0)
-                    _ec2_id    = _cmap_ee.get(_ec2_sel)
+                _cajas_ee = db.cargar_cajas()
+                _cmap_ee  = {c["nombre"]: c["id"] for c in _cajas_ee}
+                _ec2_opts = ["— sin caja —"] + list(_cmap_ee.keys())
+                _ec2_actual = _nombre_caja(_row) if _nombre_caja(_row) != "—" else "— sin caja —"
+                _ec2_sel   = st.selectbox("Caja", _ec2_opts, index=_ec2_opts.index(_ec2_actual) if _ec2_actual in _ec2_opts else 0, key=f"ee_{_eid}_c")
+                _ec2_id    = _cmap_ee.get(_ec2_sel)
 
-                    _ed2 = st.text_input("Descripción", value=_row.get("descripcion") or "")
+                _ed2 = st.text_input("Descripción", value=_row.get("descripcion") or "", key=f"ee_{_eid}_d")
 
-                    bc1, bc2 = st.columns(2)
-                    _btn_upd2 = bc1.form_submit_button("💾 Guardar")
-                    _btn_del2 = bc2.form_submit_button("🗑️ Eliminar", type="secondary")
-
-                    if _btn_upd2:
-                        db.actualizar_egreso(_row["id"], _ef2, _er2_id, _es2_id, _ei2_id, _ec2_id, _em2, _ed2)
-                        st.success("✅ Actualizado.")
-                        st.rerun()
-                    if _btn_del2:
-                        db.eliminar_egreso(_row["id"])
-                        st.rerun()
+                bc1, bc2 = st.columns(2)
+                if bc1.button("💾 Guardar", key=f"ee_{_eid}_upd"):
+                    db.actualizar_egreso(_row["id"], _ef2, _er2_id, _es2_id, _ei2_id, _ec2_id, _em2, _ed2)
+                    st.success("✅ Actualizado.")
+                    st.rerun()
+                if bc2.button("🗑️ Eliminar", key=f"ee_{_eid}_del"):
+                    db.eliminar_egreso(_row["id"])
+                    st.rerun()
     else:
         st.info("Sin egresos en el período.")
 
