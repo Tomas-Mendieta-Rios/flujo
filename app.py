@@ -296,6 +296,7 @@ with tab_comparativo:
         st.dataframe(pd.DataFrame(_mat), hide_index=True, use_container_width=True, column_config=_mat_cfg)
 
         # ── Drill-down: categoría → rubro → subrubro → ítem × mes ────────────
+        # ── Tabla única con toda la jerarquía ────────────────────────────────
         def _jerarquia_mmap(rows, tipo):
             _tree: dict = {}
             for r in rows:
@@ -308,44 +309,64 @@ with tab_comparativo:
                 _tree[_rn][_sn][_itn][_m] = _tree[_rn][_sn][_itn].get(_m, 0) + _mn
             return _tree
 
-        def _tabla_items(items_dict):
-            _rows = []
-            for _itn, _mmap in sorted(items_dict.items()):
-                _row = {"Ítem": _itn}
-                for _m in _todos_meses:
-                    _row[_cols_label[_m]] = _mmap.get(_m, 0)
-                _row["Total"] = sum(_mmap.values())
-                _rows.append(_row)
-            if len(_rows) > 1:
-                _tr = {"Ítem": "TOTAL"}
-                for _m in _todos_meses:
-                    _tr[_cols_label[_m]] = sum(r[_cols_label[_m]] for r in _rows)
-                _tr["Total"] = sum(r["Total"] for r in _rows)
-                _rows.append(_tr)
-            _cfg = {"Ítem": st.column_config.TextColumn("Ítem")}
-            _cfg.update(_num_cfg)
-            return pd.DataFrame(_rows), _cfg
+        def _mes_sum(rows, m):
+            return sum(float(r.get("monto") or 0) for r in rows if (r.get("fecha") or "")[:7] == m)
 
-        def _render_drill(rows, tipo, titulo):
+        def _make_row(concepto, mes_vals, total):
+            _r = {"Concepto": concepto}
+            _r.update(mes_vals)
+            _r["Total"] = total
+            return _r
+
+        _big_rows = []
+
+        def _add_section(label, rows, tipo):
             if not rows:
                 return
             _tree = _jerarquia_mmap(rows, tipo)
-            _tot_all = sum(v for rub in _tree.values() for sub in rub.values() for im in sub.values() for v in im.values())
-            with st.expander(f"{titulo.upper()} — {fmt(_tot_all, moneda)}"):
-                for _rn, _subs in sorted(_tree.items()):
-                    _r_tot = sum(v for sub in _subs.values() for im in sub.values() for v in im.values())
-                    with st.expander(f"{_rn.upper()} — {fmt(_r_tot, moneda)}"):
-                        for _sn, _items in sorted(_subs.items()):
-                            _s_tot = sum(v for im in _items.values() for v in im.values())
-                            with st.expander(f"{_sn.upper()} — {fmt(_s_tot, moneda)}"):
-                                _df, _cfg = _tabla_items(_items)
-                                st.dataframe(_df, hide_index=True, use_container_width=True, column_config=_cfg)
+            _cat_tot = sum(float(r.get("monto") or 0) for r in rows)
+            _big_rows.append(_make_row(
+                label.upper(),
+                {_cols_label[_m]: _mes_sum(rows, _m) for _m in _todos_meses},
+                _cat_tot,
+            ))
+            for _rn, _subs in sorted(_tree.items()):
+                _r_tot = sum(v for sub in _subs.values() for im in sub.values() for v in im.values())
+                _big_rows.append(_make_row(
+                    f"  {_rn}",
+                    {_cols_label[_m]: sum(im.get(_m, 0) for sub in _subs.values() for im in sub.values()) for _m in _todos_meses},
+                    _r_tot,
+                ))
+                for _sn, _items in sorted(_subs.items()):
+                    _s_tot = sum(v for im in _items.values() for v in im.values())
+                    _big_rows.append(_make_row(
+                        f"    {_sn}",
+                        {_cols_label[_m]: sum(im.get(_m, 0) for im in _items.values()) for _m in _todos_meses},
+                        _s_tot,
+                    ))
+                    for _itn, _mmap in sorted(_items.items()):
+                        _big_rows.append(_make_row(
+                            f"      {_itn}",
+                            {_cols_label[_m]: _mmap.get(_m, 0) for _m in _todos_meses},
+                            sum(_mmap.values()),
+                        ))
 
-        st.divider()
-        _render_drill(_ing,   "ingreso", "Ingresos")
-        _render_drill(_egr_g, "egreso",  "Gastos")
+        _add_section("Ingresos", _ing,   "ingreso")
+        _add_section("Gastos",   _egr_g, "egreso")
         if _egr_i:
-            _render_drill(_egr_i, "egreso", "Inversiones")
+            _add_section("Inversiones", _egr_i, "egreso")
+
+        # Fila Neto al final
+        _big_rows.append(_make_row(
+            "NETO",
+            {_cols_label[_m]: _mes_sum(_ing, _m) - _mes_sum(_egr_g, _m) for _m in _todos_meses},
+            sum(float(r.get("monto") or 0) for r in _ing) - sum(float(r.get("monto") or 0) for r in _egr_g),
+        ))
+
+        _big_cfg = {"Concepto": st.column_config.TextColumn("Concepto")}
+        _big_cfg.update(_num_cfg)
+        st.divider()
+        st.dataframe(pd.DataFrame(_big_rows), hide_index=True, use_container_width=True, column_config=_big_cfg)
 
     _ctab_ars, _ctab_usd = st.tabs(["🇦🇷 Pesos (ARS)", "🇺🇸 Dólares (USD)"])
     with _ctab_ars:
