@@ -331,8 +331,13 @@ with tab_comparativo:
 
         _df_ag = pd.DataFrame(_flat)
         if not _df_ag.empty:
-            _fmt_js = "params.value == null ? '' : (params.value < 0 ? '-' : '') + '$\\u00A0' + Math.abs(params.value).toLocaleString('es-AR', {minimumFractionDigits:0, maximumFractionDigits:0})"
-            _num_col_def = {"type": "numericColumn", "aggFunc": "sum", "valueFormatter": _fmt_js, "minWidth": 110}
+            _fmt_js = JsCode("""function(params){
+                if(params.value == null) return '';
+                var v = Math.abs(params.value);
+                var s = v.toLocaleString('es-AR', {minimumFractionDigits:0, maximumFractionDigits:0});
+                return (params.value < 0 ? '- ' : '') + '$ ' + s;
+            }""")
+            _num_col_def = {"type": "numericColumn", "aggFunc": "sum", "valueFormatter": _fmt_js, "minWidth": 120}
             _go = {
                 "columnDefs": [
                     {"field": "Categoría", "rowGroup": True, "hide": True},
@@ -340,7 +345,7 @@ with tab_comparativo:
                     {"field": "Subrubro",  "rowGroup": True, "hide": True},
                     {"field": "Ítem",      "hide": True},
                     *[{"field": _cols_label[_m], **_num_col_def} for _m in _todos_meses],
-                    {"field": "Total", **_num_col_def},
+                    {"field": "Total", **_num_col_def, "sort": "desc", "sortIndex": 0},
                 ],
                 "autoGroupColumnDef": {
                     "headerName": "Concepto", "minWidth": 240,
@@ -350,6 +355,7 @@ with tab_comparativo:
                 "groupDefaultExpanded": 1,
                 "suppressAggFuncInHeader": True,
                 "domLayout": "autoHeight",
+                "groupAggFiltering": False,
             }
             st.divider()
             AgGrid(_df_ag, gridOptions=_go, update_mode=GridUpdateMode.NO_UPDATE,
