@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 from datetime import date, timedelta
 import db
-from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode
+from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode, JsCode
 
 st.set_page_config(page_title="Flujo", page_icon="💰", layout="wide")
 st.title("💰 Flujo personal")
@@ -344,7 +344,7 @@ with tab_comparativo:
                 ],
                 "autoGroupColumnDef": {
                     "headerName": "Concepto", "minWidth": 240,
-                    "valueGetter": "params.node.group ? params.node.key : (params.data ? params.data['Ítem'] : '')",
+                    "valueGetter": JsCode("function(params){ return params.node.group ? params.node.key : (params.data ? params.data['Ítem'] : ''); }"),
                     "cellRendererParams": {"suppressCount": True},
                 },
                 "groupDefaultExpanded": 1,
