@@ -83,6 +83,14 @@ def _fmt_fecha(val):
         return str(val)
 
 
+def _metricas_colores(col, label, valor, moneda, color):
+    col.markdown(
+        f"<div style='font-size:0.78em;color:#888;margin-bottom:2px'>{label}</div>"
+        f"<div style='font-size:1.35em;font-weight:700;color:{color}'>{fmt(valor, moneda)}</div>",
+        unsafe_allow_html=True,
+    )
+
+
 def _eval_monto(expr: str):
     """Evalúa expresión aritmética simple (ej: '1500/3', '200+50'). Retorna float o None."""
     import re
@@ -174,34 +182,41 @@ with tab_percibido:
         _cajas_m = [c for c in _cajas_all if c.get("moneda", "ARS") == moneda]
         _ids_m   = {c["id"] for c in _cajas_m}
 
-        # Saldos actuales
-        if _cajas_m:
-            st.markdown("**Saldo actual por caja**")
-            _saldo_cols = st.columns(max(len(_cajas_m), 1))
-            for i, c in enumerate(_cajas_m):
-                _s = _calcular_saldo_caja(c["id"], _aj_all, _ing_todo, _egr_todo, _trf_all)
-                _saldo_cols[i].metric(c["nombre"], fmt(_s, moneda))
-            st.divider()
-
         _ing   = [r for r in _ing_all if r.get("caja_id") in _ids_m]
         _egr_g = [r for r in _egr_all if r.get("caja_id") in _ids_m and r.get("tipo", "gasto") == "gasto"]
         _egr_i = [r for r in _egr_all if r.get("caja_id") in _ids_m and r.get("tipo") == "inversion"]
 
-        _tot_ing = _render_seccion_jerarquia(_ing,   "ingreso", "Ingresos",   moneda, "#2e7d32")
+        # Pre-calcular totales para el resumen superior
+        _tot_ing  = sum(float(r.get("monto") or 0) for r in _ing)
+        _tot_gas  = sum(float(r.get("monto") or 0) for r in _egr_g)
+        _neto     = _tot_ing - _tot_gas
+        _saldos   = {c["id"]: _calcular_saldo_caja(c["id"], _aj_all, _ing_todo, _egr_todo, _trf_all) for c in _cajas_m}
+        _tot_caja = sum(_saldos.values())
+        _color_neto = "#2e7d32" if _neto >= 0 else "#c62828"
+
+        # ── Resumen superior ──────────────────────────────────────────────────
+        _rs1, _rs2, _rs3, _rs4 = st.columns(4)
+        _metricas_colores(_rs1, "Total en cajas", _tot_caja, moneda, "#4472C4")
+        _metricas_colores(_rs2, "Ingresos",       _tot_ing,  moneda, "#2e7d32")
+        _metricas_colores(_rs3, "Gastos",         _tot_gas,  moneda, "#c62828")
+        _metricas_colores(_rs4, "Neto",           _neto,     moneda, _color_neto)
         st.divider()
-        _tot_gas = _render_seccion_jerarquia(_egr_g, "egreso",  "Gastos",     moneda, "#c62828")
+
+        # ── Saldos por caja ───────────────────────────────────────────────────
+        if _cajas_m:
+            st.markdown("**Saldo actual por caja**")
+            _saldo_cols = st.columns(max(len(_cajas_m), 1))
+            for i, c in enumerate(_cajas_m):
+                _saldo_cols[i].metric(c["nombre"], fmt(_saldos[c["id"]], moneda))
+            st.divider()
+
+        # ── Detalle por sección ───────────────────────────────────────────────
+        _render_seccion_jerarquia(_ing,   "ingreso", "Ingresos",   moneda, "#2e7d32")
+        st.divider()
+        _render_seccion_jerarquia(_egr_g, "egreso",  "Gastos",     moneda, "#c62828")
         if _egr_i:
             st.divider()
             _render_seccion_jerarquia(_egr_i, "egreso", "Inversiones", moneda, "#5e35b1")
-
-        st.divider()
-        _neto = _tot_ing - _tot_gas
-        _color_neto = "#2e7d32" if _neto >= 0 else "#c62828"
-        st.markdown(
-            f"**Neto (Ingresos − Gastos)**<br>"
-            f"<span style='font-size:1.5em;font-weight:700;color:{_color_neto}'>{fmt(_neto, moneda)}</span>",
-            unsafe_allow_html=True,
-        )
 
     _ptab_ars, _ptab_usd = st.tabs(["🇦🇷 Pesos (ARS)", "🇺🇸 Dólares (USD)"])
     with _ptab_ars:
@@ -352,14 +367,6 @@ with tab_comparativo:
 # ═══════════════════════════════════════════════════════════════════════════════
 # MOVIMIENTOS
 # ═══════════════════════════════════════════════════════════════════════════════
-
-def _metricas_colores(col, label, valor, moneda, color):
-    col.markdown(
-        f"<div style='font-size:0.78em;color:#888;margin-bottom:2px'>{label}</div>"
-        f"<div style='font-size:1.35em;font-weight:700;color:{color}'>{fmt(valor, moneda)}</div>",
-        unsafe_allow_html=True,
-    )
-
 
 def _render_movimientos_caja(caja, desde, hasta, ing_all, egr_all, trf_all, aj_all, saldo_actual):
     caja_id = caja["id"]
