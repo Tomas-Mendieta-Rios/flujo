@@ -258,13 +258,11 @@ with tab_comparativo:
     def _render_comparativo(moneda):
         _ids_m = {c["id"] for c in _comp_cajas if c.get("moneda", "ARS") == moneda}
         _sym   = "USD" if moneda == "USD" else "$"
+        _fmt_c = f"{_sym} %,.0f"
 
-        _ing  = [r for r in _comp_ing_all if r.get("caja_id") in _ids_m]
+        _ing   = [r for r in _comp_ing_all if r.get("caja_id") in _ids_m]
         _egr_g = [r for r in _comp_egr_all if r.get("caja_id") in _ids_m and r.get("tipo","gasto") == "gasto"]
         _egr_i = [r for r in _comp_egr_all if r.get("caja_id") in _ids_m and r.get("tipo") == "inversion"]
-
-        def _meses(rows):
-            return sorted({r["fecha"][:7] for r in rows if r.get("fecha")})
 
         _todos_meses = sorted({r["fecha"][:7] for r in _ing + _egr_g + _egr_i if r.get("fecha")})
         if not _todos_meses:
@@ -272,40 +270,33 @@ with tab_comparativo:
             return
 
         _cols_label = {m: _mes_label(m) for m in _todos_meses}
+        _num_cfg = {_cols_label[_m]: st.column_config.NumberColumn(_cols_label[_m], format=_fmt_c)
+                    for _m in _todos_meses}
+        _num_cfg["Total"] = st.column_config.NumberColumn("Total", format=_fmt_c)
 
-        # ── Resumen por mes ─────────────────────────────────────────────────
-        st.markdown("#### Resumen mensual")
-        _summary_rows = []
+        def _tot_mes(rows, m):
+            return sum(float(r.get("monto") or 0) for r in rows if r.get("fecha","")[:7] == m)
+
+        # ── Matriz PBI: filas = categorías, columnas = meses ─────────────────
+        _cats = [("Ingresos", _ing), ("Gastos", _egr_g), ("Inversiones", _egr_i)]
+        _mat = []
+        for _cat_nm, _cat_rows in _cats:
+            _row = {"": _cat_nm}
+            for _m in _todos_meses:
+                _row[_cols_label[_m]] = _tot_mes(_cat_rows, _m)
+            _row["Total"] = sum(float(r.get("monto") or 0) for r in _cat_rows)
+            _mat.append(_row)
+        _neto_row = {"": "Neto"}
         for _m in _todos_meses:
-            _ti = sum(float(r.get("monto") or 0) for r in _ing   if r["fecha"][:7] == _m)
-            _tg = sum(float(r.get("monto") or 0) for r in _egr_g if r["fecha"][:7] == _m)
-            _tv = sum(float(r.get("monto") or 0) for r in _egr_i if r["fecha"][:7] == _m)
-            _summary_rows.append({
-                "Mes":        _cols_label[_m],
-                "Ingresos":   _ti,
-                "Gastos":     _tg,
-                "Inversiones": _tv,
-                "Neto":       _ti - _tg,
-            })
-        _df_sum = pd.DataFrame(_summary_rows)
-        # Fila de totales
-        _tot_row = {"Mes": "TOTAL",
-                    "Ingresos":    _df_sum["Ingresos"].sum(),
-                    "Gastos":      _df_sum["Gastos"].sum(),
-                    "Inversiones": _df_sum["Inversiones"].sum(),
-                    "Neto":        _df_sum["Neto"].sum()}
-        _df_sum = pd.concat([_df_sum, pd.DataFrame([_tot_row])], ignore_index=True)
-        _fmt_c = f"{_sym} %,.0f"
-        st.dataframe(_df_sum, hide_index=True, use_container_width=True, column_config={
-            "Ingresos":    st.column_config.NumberColumn("Ingresos",    format=_fmt_c),
-            "Gastos":      st.column_config.NumberColumn("Gastos",      format=_fmt_c),
-            "Inversiones": st.column_config.NumberColumn("Inversiones", format=_fmt_c),
-            "Neto":        st.column_config.NumberColumn("Neto",        format=_fmt_c),
-        })
+            _neto_row[_cols_label[_m]] = _mat[0][_cols_label[_m]] - _mat[1][_cols_label[_m]]
+        _neto_row["Total"] = _mat[0]["Total"] - _mat[1]["Total"]
+        _mat.append(_neto_row)
+        _mat_cfg = {"": st.column_config.TextColumn("")}
+        _mat_cfg.update(_num_cfg)
+        st.dataframe(pd.DataFrame(_mat), hide_index=True, use_container_width=True, column_config=_mat_cfg)
 
-        # ── Detalle rubro → subrubro → item × mes ──────────────────────────
+        # ── Drill-down: categoría → rubro → subrubro → ítem × mes ────────────
         def _jerarquia_mmap(rows, tipo):
-            """Devuelve {rubro: {sub: {item: {mes: monto}}}}"""
             _tree: dict = {}
             for r in rows:
                 _rn  = _nombre_rubro(r, tipo)
@@ -317,53 +308,44 @@ with tab_comparativo:
                 _tree[_rn][_sn][_itn][_m] = _tree[_rn][_sn][_itn].get(_m, 0) + _mn
             return _tree
 
-        def _piv_df(mmap_item):
-            """Convierte {item: {mes: monto}} en DataFrame con mes-cols + Total."""
+        def _tabla_items(items_dict):
             _rows = []
-            for _itn, _mmap in sorted(mmap_item.items()):
+            for _itn, _mmap in sorted(items_dict.items()):
                 _row = {"Ítem": _itn}
                 for _m in _todos_meses:
                     _row[_cols_label[_m]] = _mmap.get(_m, 0)
                 _row["Total"] = sum(_mmap.values())
                 _rows.append(_row)
-            _tot = {"Ítem": "TOTAL"}
-            for _m in _todos_meses:
-                _tot[_cols_label[_m]] = sum(r[_cols_label[_m]] for r in _rows)
-            _tot["Total"] = sum(r["Total"] for r in _rows)
-            _rows.append(_tot)
-            return pd.DataFrame(_rows)
+            if len(_rows) > 1:
+                _tr = {"Ítem": "TOTAL"}
+                for _m in _todos_meses:
+                    _tr[_cols_label[_m]] = sum(r[_cols_label[_m]] for r in _rows)
+                _tr["Total"] = sum(r["Total"] for r in _rows)
+                _rows.append(_tr)
+            _cfg = {"Ítem": st.column_config.TextColumn("Ítem")}
+            _cfg.update(_num_cfg)
+            return pd.DataFrame(_rows), _cfg
 
-        def _render_jerarquia(rows, tipo, titulo):
+        def _render_drill(rows, tipo, titulo):
             if not rows:
-                st.caption(f"Sin {titulo.lower()}.")
                 return
             _tree = _jerarquia_mmap(rows, tipo)
-            _num_cfg = {_cols_label[_m]: st.column_config.NumberColumn(_cols_label[_m], format=_fmt_c)
-                        for _m in _todos_meses}
-            _num_cfg["Total"] = st.column_config.NumberColumn("Total", format=_fmt_c)
-
-            for _rn, _subs in sorted(_tree.items()):
-                _r_tot = sum(v for sub in _subs.values() for im in sub.values() for v in im.values())
-                with st.expander(f"{_rn.upper()} — {fmt(_r_tot, moneda)}"):
-                    for _sn, _items in sorted(_subs.items()):
-                        _s_tot = sum(v for im in _items.values() for v in im.values())
-                        with st.expander(f"{_sn.upper()} — {fmt(_s_tot, moneda)}"):
-                            _df = _piv_df(_items)
-                            st.dataframe(_df, hide_index=True, use_container_width=True,
-                                         column_config=_num_cfg)
+            _tot_all = sum(v for rub in _tree.values() for sub in rub.values() for im in sub.values() for v in im.values())
+            with st.expander(f"{titulo.upper()} — {fmt(_tot_all, moneda)}"):
+                for _rn, _subs in sorted(_tree.items()):
+                    _r_tot = sum(v for sub in _subs.values() for im in sub.values() for v in im.values())
+                    with st.expander(f"{_rn.upper()} — {fmt(_r_tot, moneda)}"):
+                        for _sn, _items in sorted(_subs.items()):
+                            _s_tot = sum(v for im in _items.values() for v in im.values())
+                            with st.expander(f"{_sn.upper()} — {fmt(_s_tot, moneda)}"):
+                                _df, _cfg = _tabla_items(_items)
+                                st.dataframe(_df, hide_index=True, use_container_width=True, column_config=_cfg)
 
         st.divider()
-        st.markdown("#### Ingresos")
-        _render_jerarquia(_ing, "ingreso", "Ingresos")
-
-        st.divider()
-        st.markdown("#### Gastos")
-        _render_jerarquia(_egr_g, "egreso", "Gastos")
-
+        _render_drill(_ing,   "ingreso", "Ingresos")
+        _render_drill(_egr_g, "egreso",  "Gastos")
         if _egr_i:
-            st.divider()
-            st.markdown("#### Inversiones")
-            _render_jerarquia(_egr_i, "egreso", "Inversiones")
+            _render_drill(_egr_i, "egreso", "Inversiones")
 
     _ctab_ars, _ctab_usd = st.tabs(["🇦🇷 Pesos (ARS)", "🇺🇸 Dólares (USD)"])
     with _ctab_ars:
