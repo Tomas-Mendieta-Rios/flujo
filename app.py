@@ -83,6 +83,21 @@ def _fmt_fecha(val):
         return str(val)
 
 
+def _eval_monto(expr: str):
+    """Evalúa expresión aritmética simple (ej: '1500/3', '200+50'). Retorna float o None."""
+    import re
+    expr = (expr or "").strip().replace(",", ".")
+    if not expr:
+        return None
+    if not re.fullmatch(r"[\d\s\+\-\*\/\.\(\)]+", expr):
+        return None
+    try:
+        result = float(eval(expr))  # noqa: S307
+        return result if result > 0 else None
+    except Exception:
+        return None
+
+
 # ── Tabs principales ──────────────────────────────────────────────────────────
 
 tab_percibido, tab_comparativo, tab_movimientos, tab_ingresos, tab_egresos, tab_transferencias, tab_ajustes, tab_config = st.tabs([
@@ -498,11 +513,10 @@ def _render_fields_jerarquia(tipo, pfx, subs_by_rubro, items_by_sub, rubro_opts,
     i_list = [""] + list(item_map.keys())
     i_idx  = i_list.index(d.get("item_nm", "")) if d.get("item_nm") in i_list else 0
     item_nm = st.selectbox("Ítem", i_list, index=i_idx, key=f"{pfx}_item")
-    monto_str = st.text_input("Monto ($)", value=d.get("monto_str", ""), key=f"{pfx}_monto")
-    try:
-        monto = float(monto_str.replace(",", ".")) if monto_str else 0.0
-    except ValueError:
-        monto = 0.0
+    monto_str = st.text_input("Monto ($)  — podés escribir expresiones: 1500/3, 200+50", value=d.get("monto_str", ""), key=f"{pfx}_monto")
+    monto = _eval_monto(monto_str) or 0.0
+    if monto_str and monto > 0:
+        st.caption(f"= $ {monto:,.2f}")
     caja_list = [""] + list(caja_opts.keys())
     c_idx  = caja_list.index(d.get("caja_nm", "")) if d.get("caja_nm") in caja_list else 0
     caja   = st.selectbox("Caja", caja_list, index=c_idx, key=f"{pfx}_caja")
