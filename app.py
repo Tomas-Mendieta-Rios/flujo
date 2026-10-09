@@ -331,27 +331,29 @@ with tab_comparativo:
 
         _df_ag = pd.DataFrame(_flat)
         if not _df_ag.empty:
-            _gb = GridOptionsBuilder.from_dataframe(_df_ag)
-            _gb.configure_default_column(resizable=True, filterable=False, sortable=False,
-                                         type=["numericColumn"], valueFormatter="x == null ? '' : '$' + x.toLocaleString('es-AR', {minimumFractionDigits:0, maximumFractionDigits:0})")
-            for _col in ["Categoría", "Rubro", "Subrubro", "Ítem"]:
-                _gb.configure_column(_col, type=[], valueFormatter="")
-            _gb.configure_column("Categoría", rowGroup=True, hide=True)
-            _gb.configure_column("Rubro",     rowGroup=True, hide=True)
-            _gb.configure_column("Subrubro",  rowGroup=True, hide=True)
-            _gb.configure_column("Ítem", aggFunc="sum")
-            for _m in _todos_meses:
-                _gb.configure_column(_cols_label[_m], aggFunc="sum")
-            _gb.configure_column("Total", aggFunc="sum")
-            _gb.configure_grid_options(
-                groupDefaultExpanded=0,
-                autoGroupColumnDef={"headerName": "Concepto", "minWidth": 220,
-                                    "cellRendererParams": {"suppressCount": True}},
-            )
-            _go = _gb.build()
+            _fmt_js = "params.value == null ? '' : (params.value < 0 ? '-' : '') + '$\\u00A0' + Math.abs(params.value).toLocaleString('es-AR', {minimumFractionDigits:0, maximumFractionDigits:0})"
+            _num_col_def = {"type": "numericColumn", "aggFunc": "sum", "valueFormatter": _fmt_js, "minWidth": 110}
+            _go = {
+                "columnDefs": [
+                    {"field": "Categoría", "rowGroup": True, "hide": True},
+                    {"field": "Rubro",     "rowGroup": True, "hide": True},
+                    {"field": "Subrubro",  "rowGroup": True, "hide": True},
+                    {"field": "Ítem",      "rowGroup": True, "hide": True},
+                    *[{"field": _cols_label[_m], **_num_col_def} for _m in _todos_meses],
+                    {"field": "Total", **_num_col_def},
+                ],
+                "autoGroupColumnDef": {
+                    "headerName": "Concepto", "minWidth": 240,
+                    "cellRendererParams": {"suppressCount": True},
+                },
+                "groupDefaultExpanded": 1,
+                "suppressAggFuncInHeader": True,
+                "domLayout": "autoHeight",
+            }
             st.divider()
             AgGrid(_df_ag, gridOptions=_go, update_mode=GridUpdateMode.NO_UPDATE,
-                   height=500, fit_columns_on_grid_load=False, allow_unsafe_jscode=True)
+                   enable_enterprise_modules=True, allow_unsafe_jscode=True,
+                   fit_columns_on_grid_load=False)
 
     _ctab_ars, _ctab_usd = st.tabs(["🇦🇷 Pesos (ARS)", "🇺🇸 Dólares (USD)"])
     with _ctab_ars:
