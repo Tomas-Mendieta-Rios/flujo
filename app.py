@@ -278,25 +278,7 @@ with tab_comparativo:
         def _tot_mes(rows, m):
             return sum(float(r.get("monto") or 0) for r in rows if r.get("fecha","")[:7] == m)
 
-        # ── Matriz PBI: filas = categorías, columnas = meses ─────────────────
-        _cats = [("Ingresos", _ing), ("Gastos", _egr_g), ("Inversiones", _egr_i)]
-        _mat = []
-        for _cat_nm, _cat_rows in _cats:
-            _row = {"": _cat_nm}
-            for _m in _todos_meses:
-                _row[_cols_label[_m]] = _tot_mes(_cat_rows, _m)
-            _row["Total"] = sum(float(r.get("monto") or 0) for r in _cat_rows)
-            _mat.append(_row)
-        _neto_row = {"": "Neto"}
-        for _m in _todos_meses:
-            _neto_row[_cols_label[_m]] = _mat[0][_cols_label[_m]] - _mat[1][_cols_label[_m]]
-        _neto_row["Total"] = _mat[0]["Total"] - _mat[1]["Total"]
-        _mat.append(_neto_row)
-        _mat_cfg = {"": st.column_config.TextColumn("")}
-        _mat_cfg.update(_num_cfg)
-        st.dataframe(pd.DataFrame(_mat), hide_index=True, use_container_width=True, column_config=_mat_cfg)
-
-        # ── Drill-down: categoría → rubro → subrubro → ítem × mes ────────────
+        # ── Tabla AG Grid expandible: Categoría → Rubro → Subrubro → Ítem ──
         # ── Tabla AG Grid expandible: Categoría → Rubro → Subrubro → Ítem ──
         def _mes_sum(rows, m):
             return sum(float(r.get("monto") or 0) for r in rows if (r.get("fecha") or "")[:7] == m)
@@ -362,7 +344,6 @@ with tab_comparativo:
                     "Total": sum(float(r.get("monto") or 0) for r in _ing) - sum(float(r.get("monto") or 0) for r in _egr_g),
                 }],
             }
-            st.divider()
             AgGrid(_df_ag, gridOptions=_go, update_mode=GridUpdateMode.NO_UPDATE,
                    enable_enterprise_modules=True, allow_unsafe_jscode=True,
                    fit_columns_on_grid_load=False)
