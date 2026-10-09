@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 from datetime import date, timedelta
 import db
+from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode
 
 st.set_page_config(page_title="Flujo", page_icon="💰", layout="wide")
 st.title("💰 Flujo personal")
@@ -296,8 +297,15 @@ with tab_comparativo:
         st.dataframe(pd.DataFrame(_mat), hide_index=True, use_container_width=True, column_config=_mat_cfg)
 
         # ── Drill-down: categoría → rubro → subrubro → ítem × mes ────────────
-        # ── Tabla única con toda la jerarquía ────────────────────────────────
-        def _jerarquia_mmap(rows, tipo):
+        # ── Tabla AG Grid expandible: Categoría → Rubro → Subrubro → Ítem ──
+        def _mes_sum(rows, m):
+            return sum(float(r.get("monto") or 0) for r in rows if (r.get("fecha") or "")[:7] == m)
+
+        _flat = []
+
+        def _add_section(categoria, rows, tipo):
+            if not rows:
+                return
             _tree: dict = {}
             for r in rows:
                 _rn  = _nombre_rubro(r, tipo)
@@ -307,66 +315,43 @@ with tab_comparativo:
                 _mn  = float(r.get("monto") or 0)
                 _tree.setdefault(_rn, {}).setdefault(_sn, {}).setdefault(_itn, {})
                 _tree[_rn][_sn][_itn][_m] = _tree[_rn][_sn][_itn].get(_m, 0) + _mn
-            return _tree
-
-        def _mes_sum(rows, m):
-            return sum(float(r.get("monto") or 0) for r in rows if (r.get("fecha") or "")[:7] == m)
-
-        def _make_row(concepto, mes_vals, total):
-            _r = {"Concepto": concepto}
-            _r.update(mes_vals)
-            _r["Total"] = total
-            return _r
-
-        _big_rows = []
-
-        def _add_section(label, rows, tipo):
-            if not rows:
-                return
-            _tree = _jerarquia_mmap(rows, tipo)
-            _cat_tot = sum(float(r.get("monto") or 0) for r in rows)
-            _big_rows.append(_make_row(
-                label.upper(),
-                {_cols_label[_m]: _mes_sum(rows, _m) for _m in _todos_meses},
-                _cat_tot,
-            ))
             for _rn, _subs in sorted(_tree.items()):
-                _r_tot = sum(v for sub in _subs.values() for im in sub.values() for v in im.values())
-                _big_rows.append(_make_row(
-                    f"  {_rn}",
-                    {_cols_label[_m]: sum(im.get(_m, 0) for sub in _subs.values() for im in sub.values()) for _m in _todos_meses},
-                    _r_tot,
-                ))
                 for _sn, _items in sorted(_subs.items()):
-                    _s_tot = sum(v for im in _items.values() for v in im.values())
-                    _big_rows.append(_make_row(
-                        f"    {_sn}",
-                        {_cols_label[_m]: sum(im.get(_m, 0) for im in _items.values()) for _m in _todos_meses},
-                        _s_tot,
-                    ))
                     for _itn, _mmap in sorted(_items.items()):
-                        _big_rows.append(_make_row(
-                            f"      {_itn}",
-                            {_cols_label[_m]: _mmap.get(_m, 0) for _m in _todos_meses},
-                            sum(_mmap.values()),
-                        ))
+                        _row = {"Categoría": categoria, "Rubro": _rn, "Subrubro": _sn, "Ítem": _itn}
+                        for _m in _todos_meses:
+                            _row[_cols_label[_m]] = _mmap.get(_m, 0)
+                        _row["Total"] = sum(_mmap.values())
+                        _flat.append(_row)
 
-        _add_section("Ingresos", _ing,   "ingreso")
-        _add_section("Gastos",   _egr_g, "egreso")
+        _add_section("Ingresos",   _ing,   "ingreso")
+        _add_section("Gastos",     _egr_g, "egreso")
         if _egr_i:
             _add_section("Inversiones", _egr_i, "egreso")
 
-        # Fila Neto al final
-        _big_rows.append(_make_row(
-            "NETO",
-            {_cols_label[_m]: _mes_sum(_ing, _m) - _mes_sum(_egr_g, _m) for _m in _todos_meses},
-            sum(float(r.get("monto") or 0) for r in _ing) - sum(float(r.get("monto") or 0) for r in _egr_g),
-        ))
-
-        _big_cfg = {"Concepto": st.column_config.TextColumn("Concepto")}
-        _big_cfg.update(_num_cfg)
-        st.divider()
-        st.dataframe(pd.DataFrame(_big_rows), hide_index=True, use_container_width=True, column_config=_big_cfg)
+        _df_ag = pd.DataFrame(_flat)
+        if not _df_ag.empty:
+            _gb = GridOptionsBuilder.from_dataframe(_df_ag)
+            _gb.configure_default_column(resizable=True, filterable=False, sortable=False,
+                                         type=["numericColumn"], valueFormatter="x == null ? '' : '$' + x.toLocaleString('es-AR', {minimumFractionDigits:0, maximumFractionDigits:0})")
+            for _col in ["Categoría", "Rubro", "Subrubro", "Ítem"]:
+                _gb.configure_column(_col, type=[], valueFormatter="")
+            _gb.configure_column("Categoría", rowGroup=True, hide=True)
+            _gb.configure_column("Rubro",     rowGroup=True, hide=True)
+            _gb.configure_column("Subrubro",  rowGroup=True, hide=True)
+            _gb.configure_column("Ítem", aggFunc="sum")
+            for _m in _todos_meses:
+                _gb.configure_column(_cols_label[_m], aggFunc="sum")
+            _gb.configure_column("Total", aggFunc="sum")
+            _gb.configure_grid_options(
+                groupDefaultExpanded=0,
+                autoGroupColumnDef={"headerName": "Concepto", "minWidth": 220,
+                                    "cellRendererParams": {"suppressCount": True}},
+            )
+            _go = _gb.build()
+            st.divider()
+            AgGrid(_df_ag, gridOptions=_go, update_mode=GridUpdateMode.NO_UPDATE,
+                   height=500, fit_columns_on_grid_load=False, allow_unsafe_jscode=True)
 
     _ctab_ars, _ctab_usd = st.tabs(["🇦🇷 Pesos (ARS)", "🇺🇸 Dólares (USD)"])
     with _ctab_ars:
