@@ -349,13 +349,18 @@ with tab_comparativo:
                 ],
                 "autoGroupColumnDef": {
                     "headerName": "Concepto", "minWidth": 240,
-                    "valueGetter": JsCode("function(params){ return params.node.group ? params.node.key : (params.data ? params.data['Ítem'] : ''); }"),
+                    "valueGetter": JsCode("function(params){ if(params.node.rowPinned) return 'NETO'; if(params.node.group) return params.node.key; return params.data ? params.data['Ítem'] : ''; }"),
                     "cellRendererParams": {"suppressCount": True},
                 },
                 "groupDefaultExpanded": 1,
                 "suppressAggFuncInHeader": True,
                 "domLayout": "autoHeight",
                 "groupAggFiltering": False,
+                "pinnedBottomRowData": [{
+                    "Categoría": "", "Rubro": "", "Subrubro": "", "Ítem": "NETO",
+                    **{_cols_label[_m]: _mes_sum(_ing, _m) - _mes_sum(_egr_g, _m) for _m in _todos_meses},
+                    "Total": sum(float(r.get("monto") or 0) for r in _ing) - sum(float(r.get("monto") or 0) for r in _egr_g),
+                }],
             }
             st.divider()
             AgGrid(_df_ag, gridOptions=_go, update_mode=GridUpdateMode.NO_UPDATE,
