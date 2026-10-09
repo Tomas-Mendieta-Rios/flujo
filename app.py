@@ -13,30 +13,36 @@ def fmt(v, moneda="ARS"):
     return f"{sym} {float(v or 0):,.0f}"
 
 
-def _calcular_saldo_caja(caja_id, ajustes, ingresos, egresos, transferencias):
-    """Saldo actual = saldo_inicial + ingresos - egresos ± transferencias ± ajustes libres."""
+def _calcular_saldo_caja(caja_id, ajustes, ingresos, egresos, transferencias, hasta=None):
+    """Saldo = saldo_inicial + ingresos - egresos ± transferencias ± ajustes, hasta la fecha indicada."""
     saldo = 0.0
     fecha_ini = None
+    _hs = str(hasta) if hasta else None
     for a in ajustes:
         if a["caja_id"] == caja_id and a["tipo"] == "inicial":
-            saldo = float(a["monto"])
-            fecha_ini = a["fecha"]
+            if _hs is None or str(a["fecha"]) <= _hs:
+                saldo = float(a["monto"])
+                fecha_ini = a["fecha"]
             break
     for r in ingresos:
         if r.get("caja_id") == caja_id and (not fecha_ini or r["fecha"] >= fecha_ini):
-            saldo += float(r["monto"])
+            if _hs is None or str(r["fecha"]) <= _hs:
+                saldo += float(r["monto"])
     for r in egresos:
         if r.get("caja_id") == caja_id and (not fecha_ini or r["fecha"] >= fecha_ini):
-            saldo -= float(r["monto"])
+            if _hs is None or str(r["fecha"]) <= _hs:
+                saldo -= float(r["monto"])
     for r in transferencias:
         if not fecha_ini or r["fecha"] >= fecha_ini:
-            if r.get("destino_id") == caja_id:
-                saldo += float(r["monto"])
-            if r.get("origen_id") == caja_id:
-                saldo -= float(r["monto"])
+            if _hs is None or str(r["fecha"]) <= _hs:
+                if r.get("destino_id") == caja_id:
+                    saldo += float(r["monto"])
+                if r.get("origen_id") == caja_id:
+                    saldo -= float(r["monto"])
     for a in ajustes:
         if a["caja_id"] == caja_id and a["tipo"] == "ajuste" and (not fecha_ini or a["fecha"] >= fecha_ini):
-            saldo += float(a["monto"])
+            if _hs is None or str(a["fecha"]) <= _hs:
+                saldo += float(a["monto"])
     return saldo
 
 
@@ -190,14 +196,14 @@ with tab_percibido:
         _tot_ing  = sum(float(r.get("monto") or 0) for r in _ing)
         _tot_gas  = sum(float(r.get("monto") or 0) for r in _egr_g)
         _neto     = _tot_ing - _tot_gas
-        _saldos   = {c["id"]: _calcular_saldo_caja(c["id"], _aj_all, _ing_todo, _egr_todo, _trf_all) for c in _cajas_m}
+        _saldos   = {c["id"]: _calcular_saldo_caja(c["id"], _aj_all, _ing_todo, _egr_todo, _trf_all, hasta=_hasta) for c in _cajas_m}
         _tot_caja = sum(_saldos.values())
         _color_neto = "#2e7d32" if _neto >= 0 else "#c62828"
 
         # ── Resumen superior ──────────────────────────────────────────────────
         _tot_inv = sum(float(r.get("monto") or 0) for r in _egr_i)
         _rs1, _rs2, _rs3, _rs4, _rs5 = st.columns(5)
-        _metricas_colores(_rs1, "Total en cajas", _tot_caja, moneda, "#4472C4")
+        _metricas_colores(_rs1, f"Saldo al {_hasta.strftime('%d/%m/%y')}", _tot_caja, moneda, "#4472C4")
         _metricas_colores(_rs2, "Ingresos",       _tot_ing,  moneda, "#2e7d32")
         _metricas_colores(_rs3, "Gastos",         _tot_gas,  moneda, "#c62828")
         _metricas_colores(_rs4, "Inversiones",    _tot_inv,  moneda, "#5e35b1")
@@ -464,7 +470,7 @@ with tab_movimientos:
             st.info("No hay cajas configuradas para esta moneda.")
             return
 
-        _saldos = {c["id"]: _calcular_saldo_caja(c["id"], _aj_m_all, _ing_m_all, _egr_m_all, _trf_m_all)
+        _saldos = {c["id"]: _calcular_saldo_caja(c["id"], _aj_m_all, _ing_m_all, _egr_m_all, _trf_m_all, hasta=_hasta_m)
                    for c in _cajas_mon}
 
         # Calcular entradas/salidas del período para el total general
@@ -483,7 +489,7 @@ with tab_movimientos:
         # ── Total general ──────────────────────────────────────────────────────
         st.markdown("### Total general")
         _tg1, _tg2, _tg3 = st.columns(3)
-        _metricas_colores(_tg1, "Saldo",    _tot_saldo_g, moneda, "#4472C4")
+        _metricas_colores(_tg1, f"Saldo al {_hasta_m.strftime('%d/%m/%y')}", _tot_saldo_g, moneda, "#4472C4")
         _metricas_colores(_tg2, "Entradas", _tot_ent_g,   moneda, "#2e7d32")
         _metricas_colores(_tg3, "Salidas",  _tot_sal_g,   moneda, "#c62828")
         st.divider()
