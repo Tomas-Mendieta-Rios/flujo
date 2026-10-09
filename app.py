@@ -598,6 +598,10 @@ with tab_ingresos:
             if not _lista:
                 st.caption("Sin registros en el rango.")
                 return
+            _cajas_en_i = sorted({_oi_caja_map.get(o.get("caja_id"), "—") for o in _lista})
+            _fil_c_i = st.selectbox("Caja", ["Todas"] + _cajas_en_i, key="oi_fil_c")
+            if _fil_c_i != "Todas":
+                _lista = [o for o in _lista if _oi_caja_map.get(o.get("caja_id")) == _fil_c_i]
             for _oi in _lista:
                 _oi_id   = _oi["id"]
                 _r_nm    = (_oi.get("rubros_ingresos") or {}).get("nombre") or _oi_rubro_map.get(_oi.get("rubro_id"), "—")
@@ -766,6 +770,10 @@ with tab_egresos:
                 st.caption("Sin registros en el rango.")
                 return
 
+            _cajas_en_e = sorted({_oe_caja_map.get(o.get("caja_id"), "—") for o in _lista})
+            _fil_c_e = st.selectbox("Caja", ["Todas"] + _cajas_en_e, key="oe_fil_c")
+            if _fil_c_e != "Todas":
+                _lista = [o for o in _lista if _oe_caja_map.get(o.get("caja_id")) == _fil_c_e]
             _rubros_en = sorted({(o.get("rubros_egresos") or {}).get("nombre") or "—" for o in _lista})
             _fil_r = st.selectbox("Rubro", ["Todos"] + _rubros_en, key="oe_fil_r")
             if _fil_r != "Todos":
