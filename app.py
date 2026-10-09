@@ -195,11 +195,13 @@ with tab_percibido:
         _color_neto = "#2e7d32" if _neto >= 0 else "#c62828"
 
         # ── Resumen superior ──────────────────────────────────────────────────
-        _rs1, _rs2, _rs3, _rs4 = st.columns(4)
+        _tot_inv = sum(float(r.get("monto") or 0) for r in _egr_i)
+        _rs1, _rs2, _rs3, _rs4, _rs5 = st.columns(5)
         _metricas_colores(_rs1, "Total en cajas", _tot_caja, moneda, "#4472C4")
         _metricas_colores(_rs2, "Ingresos",       _tot_ing,  moneda, "#2e7d32")
         _metricas_colores(_rs3, "Gastos",         _tot_gas,  moneda, "#c62828")
-        _metricas_colores(_rs4, "Neto",           _neto,     moneda, _color_neto)
+        _metricas_colores(_rs4, "Inversiones",    _tot_inv,  moneda, "#5e35b1")
+        _metricas_colores(_rs5, "Neto",           _neto,     moneda, _color_neto)
         st.divider()
 
         # ── Saldos por caja ───────────────────────────────────────────────────
