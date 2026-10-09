@@ -108,6 +108,10 @@ def eliminar_item_ingreso(id):
     cargar_items_ingresos.clear()
 
 
+def item_ingreso_tiene_transacciones(item_id) -> bool:
+    return bool(get_client().table("ingresos").select("id").eq("item_id", item_id).limit(1).execute().data)
+
+
 # ── RUBROS EGRESOS ────────────────────────────────────────────────────────────
 
 @st.cache_data(ttl=120)
@@ -179,6 +183,10 @@ def actualizar_item_egreso(id, nombre, subrubro_id=None, activo=None):
 def eliminar_item_egreso(id):
     get_client().table("items_egresos").delete().eq("id", id).execute()
     cargar_items_egresos.clear()
+
+
+def item_egreso_tiene_transacciones(item_id) -> bool:
+    return bool(get_client().table("egresos").select("id").eq("item_id", item_id).limit(1).execute().data)
 
 
 # ── INGRESOS ──────────────────────────────────────────────────────────────────

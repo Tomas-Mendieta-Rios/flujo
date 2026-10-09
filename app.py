@@ -1047,8 +1047,15 @@ with tab_config:
 
     # ── Rubros ingresos ────────────────────────────────────────────────────────
     with _sub_ri:
-        _rubros_cfg_i = db.cargar_rubros_ingresos()
-        _rmap_cfg_i   = {r["nombre"]: r["id"] for r in _rubros_cfg_i}
+        _rubros_cfg_i    = db.cargar_rubros_ingresos()
+        _rmap_cfg_i      = {r["nombre"]: r["id"] for r in _rubros_cfg_i}
+        _rmap_cfg_i_byid = {r["id"]: r["nombre"] for r in _rubros_cfg_i}
+        _all_subs_cfg_i  = db.cargar_subrubros_ingresos()
+        # "Rubro / Subrubro" → subrubro_id  (para el selector de reasignación)
+        _sub_opts_cfg_i  = {
+            f"{_rmap_cfg_i_byid.get(s['rubro_id'], '?')} / {s['nombre']}": s["id"]
+            for s in sorted(_all_subs_cfg_i, key=lambda x: x["nombre"])
+        }
 
         st.markdown("**Rubros**")
         for _r in _rubros_cfg_i:
@@ -1085,12 +1092,23 @@ with tab_config:
                                 with st.form(f"edit_ii_{_it['id']}"):
                                     _itn = st.text_input("Nombre", value=_it["nombre"])
                                     _ita = st.checkbox("Activo", value=_it["activo"])
+                                    # Selector de reasignación rubro/subrubro
+                                    _cur_sub_lbl = next(
+                                        (k for k, v in _sub_opts_cfg_i.items() if v == _it.get("subrubro_id")), None
+                                    )
+                                    _sub_lbl_list = list(_sub_opts_cfg_i.keys())
+                                    _sub_lbl_idx  = _sub_lbl_list.index(_cur_sub_lbl) if _cur_sub_lbl in _sub_lbl_list else 0
+                                    _new_sub_lbl  = st.selectbox("Subrubro", _sub_lbl_list, index=_sub_lbl_idx, key=f"sub_ii_{_it['id']}")
                                     bc1, bc2 = st.columns(2)
                                     if bc1.form_submit_button("💾 Guardar"):
-                                        db.actualizar_item_ingreso(_it["id"], _itn, activo=_ita)
+                                        db.actualizar_item_ingreso(_it["id"], _itn,
+                                            subrubro_id=_sub_opts_cfg_i.get(_new_sub_lbl), activo=_ita)
                                         st.rerun()
-                                    if bc2.form_submit_button("🗑️ Eliminar", type="secondary"):
-                                        db.eliminar_item_ingreso(_it["id"])
+                                    if bc2.form_submit_button("🗑️ Eliminar / Inactivar", type="secondary"):
+                                        if db.item_ingreso_tiene_transacciones(_it["id"]):
+                                            db.actualizar_item_ingreso(_it["id"], _it["nombre"], activo=False)
+                                        else:
+                                            db.eliminar_item_ingreso(_it["id"])
                                         st.rerun()
 
                         with st.form(f"new_ii_{_s['id']}"):
@@ -1116,7 +1134,13 @@ with tab_config:
 
     # ── Rubros egresos ─────────────────────────────────────────────────────────
     with _sub_re:
-        _rubros_cfg_e = db.cargar_rubros_egresos()
+        _rubros_cfg_e    = db.cargar_rubros_egresos()
+        _rmap_cfg_e_byid = {r["id"]: r["nombre"] for r in _rubros_cfg_e}
+        _all_subs_cfg_e  = db.cargar_subrubros_egresos()
+        _sub_opts_cfg_e  = {
+            f"{_rmap_cfg_e_byid.get(s['rubro_id'], '?')} / {s['nombre']}": s["id"]
+            for s in sorted(_all_subs_cfg_e, key=lambda x: x["nombre"])
+        }
 
         st.markdown("**Rubros**")
         for _r in _rubros_cfg_e:
@@ -1151,12 +1175,22 @@ with tab_config:
                                 with st.form(f"edit_ie_{_it['id']}"):
                                     _itne = st.text_input("Nombre", value=_it["nombre"])
                                     _itae = st.checkbox("Activo", value=_it["activo"])
+                                    _cur_sub_lbl_e = next(
+                                        (k for k, v in _sub_opts_cfg_e.items() if v == _it.get("subrubro_id")), None
+                                    )
+                                    _sub_lbl_list_e = list(_sub_opts_cfg_e.keys())
+                                    _sub_lbl_idx_e  = _sub_lbl_list_e.index(_cur_sub_lbl_e) if _cur_sub_lbl_e in _sub_lbl_list_e else 0
+                                    _new_sub_lbl_e  = st.selectbox("Subrubro", _sub_lbl_list_e, index=_sub_lbl_idx_e, key=f"sub_ie_{_it['id']}")
                                     bc1, bc2 = st.columns(2)
                                     if bc1.form_submit_button("💾 Guardar"):
-                                        db.actualizar_item_egreso(_it["id"], _itne, activo=_itae)
+                                        db.actualizar_item_egreso(_it["id"], _itne,
+                                            subrubro_id=_sub_opts_cfg_e.get(_new_sub_lbl_e), activo=_itae)
                                         st.rerun()
-                                    if bc2.form_submit_button("🗑️ Eliminar", type="secondary"):
-                                        db.eliminar_item_egreso(_it["id"])
+                                    if bc2.form_submit_button("🗑️ Eliminar / Inactivar", type="secondary"):
+                                        if db.item_egreso_tiene_transacciones(_it["id"]):
+                                            db.actualizar_item_egreso(_it["id"], _it["nombre"], activo=False)
+                                        else:
+                                            db.eliminar_item_egreso(_it["id"])
                                         st.rerun()
 
                         with st.form(f"new_ie_{_s['id']}"):
