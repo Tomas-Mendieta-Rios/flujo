@@ -108,6 +108,10 @@ def eliminar_item_ingreso(id):
     cargar_items_ingresos.clear()
 
 
+def actualizar_transacciones_item_ingreso(item_id, rubro_id, subrubro_id):
+    get_client().table("ingresos").update({"rubro_id": rubro_id, "subrubro_id": subrubro_id}).eq("item_id", item_id).execute()
+    cargar_ingresos.clear()
+
 def rubro_ingreso_tiene_transacciones(rubro_id) -> bool:
     return bool(get_client().table("ingresos").select("id").eq("rubro_id", rubro_id).limit(1).execute().data)
 
@@ -190,6 +194,10 @@ def eliminar_item_egreso(id):
     get_client().table("items_egresos").delete().eq("id", id).execute()
     cargar_items_egresos.clear()
 
+
+def actualizar_transacciones_item_egreso(item_id, rubro_id, subrubro_id):
+    get_client().table("egresos").update({"rubro_id": rubro_id, "subrubro_id": subrubro_id}).eq("item_id", item_id).execute()
+    cargar_egresos.clear()
 
 def rubro_egreso_tiene_transacciones(rubro_id) -> bool:
     return bool(get_client().table("egresos").select("id").eq("rubro_id", rubro_id).limit(1).execute().data)

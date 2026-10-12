@@ -1094,15 +1094,18 @@ with tab_config:
 
             bc1, bc2 = st.columns(2)
             if bc1.button("💾 Guardar", key=f"{_pfx}_save", type="primary"):
-                db.actualizar_item_ingreso(it["id"], _itn,
-                    subrubro_id=_sel_sub["id"] if _sel_sub else it.get("subrubro_id"), activo=_ita)
+                _new_sub_id = _sel_sub["id"] if _sel_sub else it.get("subrubro_id")
+                _new_rub_id = _sel_rubro["id"] if _sel_rubro else None
+                db.actualizar_item_ingreso(it["id"], _itn, subrubro_id=_new_sub_id, activo=_ita)
+                if _new_sub_id != it.get("subrubro_id") and _new_sub_id:
+                    db.actualizar_transacciones_item_ingreso(it["id"], _new_rub_id, _new_sub_id)
                 st.rerun()
-            if bc2.button("🗑️ Eliminar / Inactivar", key=f"{_pfx}_del"):
+            if bc2.button("🗑️ Eliminar", key=f"{_pfx}_del"):
                 if db.item_ingreso_tiene_transacciones(it["id"]):
-                    db.actualizar_item_ingreso(it["id"], it["nombre"], activo=False)
+                    st.error("No se puede eliminar: tiene transacciones asociadas.")
                 else:
                     db.eliminar_item_ingreso(it["id"])
-                st.rerun()
+                    st.rerun()
 
         st.markdown("**Rubros**")
         for _r in _rubros_cfg_i:
@@ -1192,15 +1195,18 @@ with tab_config:
 
             bc1, bc2 = st.columns(2)
             if bc1.button("💾 Guardar", key=f"{_pfx}_save", type="primary"):
-                db.actualizar_item_egreso(it["id"], _itne,
-                    subrubro_id=_sel_sub["id"] if _sel_sub else it.get("subrubro_id"), activo=_itae)
+                _new_sub_id = _sel_sub["id"] if _sel_sub else it.get("subrubro_id")
+                _new_rub_id = _sel_rubro["id"] if _sel_rubro else None
+                db.actualizar_item_egreso(it["id"], _itne, subrubro_id=_new_sub_id, activo=_itae)
+                if _new_sub_id != it.get("subrubro_id") and _new_sub_id:
+                    db.actualizar_transacciones_item_egreso(it["id"], _new_rub_id, _new_sub_id)
                 st.rerun()
-            if bc2.button("🗑️ Eliminar / Inactivar", key=f"{_pfx}_del"):
+            if bc2.button("🗑️ Eliminar", key=f"{_pfx}_del"):
                 if db.item_egreso_tiene_transacciones(it["id"]):
-                    db.actualizar_item_egreso(it["id"], it["nombre"], activo=False)
+                    st.error("No se puede eliminar: tiene transacciones asociadas.")
                 else:
                     db.eliminar_item_egreso(it["id"])
-                st.rerun()
+                    st.rerun()
 
         st.markdown("**Rubros**")
         for _r in _rubros_cfg_e:
