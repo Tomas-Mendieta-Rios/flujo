@@ -461,12 +461,13 @@ with tab_movimientos:
         def _en(f): return _ds <= str(f or "") <= _hs
         _ids_mon = {c["id"] for c in _cajas_mon}
 
-        _tot_ent_g = (sum(float(r.get("monto") or 0) for r in _ing_m_all  if r.get("caja_id") in _ids_mon and _en(r.get("fecha")))
-                    + sum(float(r.get("monto") or 0) for r in _trf_m_all  if r.get("destino_id") in _ids_mon and _en(r.get("fecha")))
-                    + sum(float(r.get("monto") or 0) for r in _aj_m_all   if r.get("caja_id") in _ids_mon and r.get("tipo") == "ajuste" and float(r.get("monto") or 0) > 0 and _en(r.get("fecha"))))
-        _tot_sal_g = (sum(float(r.get("monto") or 0) for r in _egr_m_all  if r.get("caja_id") in _ids_mon and _en(r.get("fecha")))
-                    + sum(float(r.get("monto") or 0) for r in _trf_m_all  if r.get("origen_id")  in _ids_mon and _en(r.get("fecha")))
-                    + sum(-float(r.get("monto") or 0) for r in _aj_m_all  if r.get("caja_id") in _ids_mon and r.get("tipo") == "ajuste" and float(r.get("monto") or 0) < 0 and _en(r.get("fecha"))))
+        # Transferencias internas (entre cajas del mismo grupo) se excluyen del total general
+        _tot_ent_g = (sum(float(r.get("monto") or 0) for r in _ing_m_all if r.get("caja_id") in _ids_mon and _en(r.get("fecha")))
+                    + sum(float(r.get("monto") or 0) for r in _trf_m_all if r.get("destino_id") in _ids_mon and r.get("origen_id") not in _ids_mon and _en(r.get("fecha")))
+                    + sum(float(r.get("monto") or 0) for r in _aj_m_all  if r.get("caja_id") in _ids_mon and r.get("tipo") == "ajuste" and float(r.get("monto") or 0) > 0 and _en(r.get("fecha"))))
+        _tot_sal_g = (sum(float(r.get("monto") or 0) for r in _egr_m_all if r.get("caja_id") in _ids_mon and _en(r.get("fecha")))
+                    + sum(float(r.get("monto") or 0) for r in _trf_m_all if r.get("origen_id") in _ids_mon and r.get("destino_id") not in _ids_mon and _en(r.get("fecha")))
+                    + sum(-float(r.get("monto") or 0) for r in _aj_m_all if r.get("caja_id") in _ids_mon and r.get("tipo") == "ajuste" and float(r.get("monto") or 0) < 0 and _en(r.get("fecha"))))
         _tot_saldo_g = sum(_saldos.values())
 
         # ── Total general ──────────────────────────────────────────────────────
