@@ -1114,8 +1114,11 @@ with tab_config:
                         db.actualizar_rubro_ingreso(_r["id"], _rn)
                         st.rerun()
                     if bc2.form_submit_button("🗑️ Eliminar", type="secondary"):
-                        db.eliminar_rubro_ingreso(_r["id"])
-                        st.rerun()
+                        if db.rubro_ingreso_tiene_transacciones(_r["id"]):
+                            st.error("No se puede eliminar: tiene transacciones asociadas.")
+                        else:
+                            db.eliminar_rubro_ingreso(_r["id"])
+                            st.rerun()
 
                 st.markdown("*Subrubros*")
                 _subs_i = db.cargar_subrubros_ingresos(_r["id"])
@@ -1128,8 +1131,11 @@ with tab_config:
                                 db.actualizar_subrubro_ingreso(_s["id"], _sn, _r["id"])
                                 st.rerun()
                             if bc2.form_submit_button("🗑️ Eliminar", type="secondary"):
-                                db.eliminar_subrubro_ingreso(_s["id"])
-                                st.rerun()
+                                if db.subrubro_ingreso_tiene_transacciones(_s["id"]):
+                                    st.error("No se puede eliminar: tiene transacciones asociadas.")
+                                else:
+                                    db.eliminar_subrubro_ingreso(_s["id"])
+                                    st.rerun()
 
                         _items_i = db.cargar_items_ingresos(_s["id"])
                         for _it in _items_i:
@@ -1206,8 +1212,11 @@ with tab_config:
                         db.actualizar_rubro_egreso(_r["id"], _rne)
                         st.rerun()
                     if bc2.form_submit_button("🗑️ Eliminar", type="secondary"):
-                        db.eliminar_rubro_egreso(_r["id"])
-                        st.rerun()
+                        if db.rubro_egreso_tiene_transacciones(_r["id"]):
+                            st.error("No se puede eliminar: tiene transacciones asociadas.")
+                        else:
+                            db.eliminar_rubro_egreso(_r["id"])
+                            st.rerun()
 
                 st.markdown("*Subrubros*")
                 _subs_e = db.cargar_subrubros_egresos(_r["id"])
@@ -1220,8 +1229,11 @@ with tab_config:
                                 db.actualizar_subrubro_egreso(_s["id"], _sne, _r["id"])
                                 st.rerun()
                             if bc2.form_submit_button("🗑️ Eliminar", type="secondary"):
-                                db.eliminar_subrubro_egreso(_s["id"])
-                                st.rerun()
+                                if db.subrubro_egreso_tiene_transacciones(_s["id"]):
+                                    st.error("No se puede eliminar: tiene transacciones asociadas.")
+                                else:
+                                    db.eliminar_subrubro_egreso(_s["id"])
+                                    st.rerun()
 
                         _items_e = db.cargar_items_egresos(_s["id"])
                         for _it in _items_e:
